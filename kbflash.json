@@ -1,7 +1,7 @@
 {
     "app_vendor": "8d1d",
-    "halves": {
-        "left": {"flash_id": "E460A8534F2F5136", "bootmagic": "\"5\""},
-        "right": {"flash_id": "E460A8534F3B3E36", "bootmagic": "\"6\""}
-    }
+    "halves": [
+        {"side": "left", "flash_id": "E460A8534F2F5136", "bootmagic": "\"5\""},
+        {"side": "right", "flash_id": "E460A8534F3B3E36", "bootmagic": "\"6\""}
+    ]
 }

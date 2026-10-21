@@ -20,26 +20,31 @@ endif
 # (the keymap's rules.mk sets CONVERT_TO=liatris)
 KB ?= splitkb/aurora/sofle_v2/rev1
 KM ?= mdjarv
-KBFLASH := $(QMK_USERSPACE)/tools/kbflash
+KBFLASH_DIR := $(QMK_USERSPACE)/tools/kbflash
+KBFLASH := $(KBFLASH_DIR)/kbflash
 FIRMWARE := $(QMK_USERSPACE)/$(subst /,_,$(KB))_$(KM).uf2
+export KBFLASH_CONFIG := $(QMK_USERSPACE)/kbflash.json
 
 .PHONY: backup restore drill build flash
 
-backup:
+$(KBFLASH): $(wildcard $(KBFLASH_DIR)/*.go) $(KBFLASH_DIR)/go.mod
+	cd $(KBFLASH_DIR) && go build -o kbflash .
+
+backup: $(KBFLASH)
 	$(KBFLASH) backup
 
-restore:
+restore: $(KBFLASH)
 	test -n "$(BACKUP)" || { echo "usage: make restore BACKUP=<backup dir>"; exit 2; }
 	$(KBFLASH) restore "$(BACKUP)"
 
-drill:
+drill: $(KBFLASH)
 	$(KBFLASH) drill
 
 build:
 	$(QMK_BIN) compile -kb $(KB) -km $(KM)
 
-flash: build
-	$(KBFLASH) flash "$(FIRMWARE)" $(if $(ERASE),--erase)
+flash: $(KBFLASH)
+	$(KBFLASH) flash "$(FIRMWARE)" --build "$(QMK_BIN) compile -kb $(KB) -km $(KM)" $(if $(ERASE),--erase)
 
 %:
 	+$(MAKE) -C $(QMK_FIRMWARE_ROOT) $(MAKECMDGOALS) QMK_USERSPACE=$(QMK_USERSPACE)
