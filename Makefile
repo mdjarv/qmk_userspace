@@ -25,7 +25,7 @@ KBFLASH := $(KBFLASH_DIR)/kbflash
 FIRMWARE := $(QMK_USERSPACE)/$(subst /,_,$(KB))_$(KM).uf2
 export KBFLASH_CONFIG := $(QMK_USERSPACE)/kbflash.json
 
-.PHONY: backup restore drill build flash
+.PHONY: backup restore drill build flash draw
 
 $(KBFLASH): $(wildcard $(KBFLASH_DIR)/*.go) $(KBFLASH_DIR)/go.mod
 	cd $(KBFLASH_DIR) && go build -o kbflash .
@@ -45,6 +45,12 @@ build:
 
 flash: $(KBFLASH)
 	$(KBFLASH) flash "$(FIRMWARE)" --build "$(QMK_BIN) compile -kb $(KB) -km $(KM)" $(if $(ERASE),--erase)
+
+# Layer picture for the keymap README (keymap-drawer via uvx)
+KEYMAP_DIR := $(QMK_USERSPACE)/keyboards/$(patsubst %/rev1,%,$(KB))/keymaps/$(KM)
+draw:
+	cd $(KEYMAP_DIR) && uvx --from keymap-drawer keymap -c keymap-drawer.yaml parse -q keymap.json -l Default Game Lower Raise -c 12 \
+		| uvx --from keymap-drawer keymap -c keymap-drawer.yaml draw - > keymap.svg
 
 %:
 	+$(MAKE) -C $(QMK_FIRMWARE_ROOT) $(MAKECMDGOALS) QMK_USERSPACE=$(QMK_USERSPACE)

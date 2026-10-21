@@ -1,3 +1,4 @@
 #pragma once
 
-enum layers { _DEFAULT, _GAME, _LOWER, _RAISE, _ADJUST };
+// Layer order in keymap.json, which can only refer to layers by number.
+enum layers { _DEFAULT, _GAME, _LOWER, _RAISE };

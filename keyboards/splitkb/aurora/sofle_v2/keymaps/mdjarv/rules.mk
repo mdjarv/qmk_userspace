@@ -1,6 +1,2 @@
-CONVERT_TO = liatris
-
-WPM_ENABLE = yes
-ENCODER_MAP_ENABLE = yes
-
+# Everything else is in keymap.json
 SRC += oled.c

@@ -3,9 +3,11 @@
 // Status rendering originally from crkbd/soundmonster, via splitkb's sofle_v2.c.
 #include QMK_KEYBOARD_H
 #include "layers.h"
-#include "gfx_idle_small.h"
-#include "gfx_headphones.h"
-#include "gfx_amazed.h"
+#include "gfx/idle_small.h"
+#include "gfx/headphones.h"
+#include "gfx/amazed.h"
+
+#define OLED_IDLE_TIMEOUT 60000 // ms without input before both screens blank
 
 static void render_mod_status_gui_alt(uint8_t modifiers) {
     static const char PROGMEM gui_off_1[] = {0x85, 0x86, 0};
@@ -159,9 +161,6 @@ static void render_layer_state(void) {
             break;
         case _RAISE:
             oled_write_P(raise_layer, false);
-            break;
-        case _ADJUST:
-            oled_write_P(adjust_layer, false);
             break;
         case _GAME:
             oled_write_P(adjust_layer, false);

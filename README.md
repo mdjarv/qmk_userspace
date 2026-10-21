@@ -60,6 +60,9 @@ This can also be used to control which fork is used, though only upstream `qmk_f
 
 ## Flashing the Sofle (mdjarv)
 
+Keymap and its notes: [keyboards/splitkb/aurora/sofle_v2/keymaps/mdjarv](keyboards/splitkb/aurora/sofle_v2/keymaps/mdjarv/README.md).
+
+
 `tools/kbflash` waits for each half to enter the bootloader, recognises it by its RP2040 flash ID (`kbflash.json`) and drives `picotool`, so no keypress is needed mid-run. A backup only restores to the half it came from. Needs `picotool` (AUR) and Go; `make` builds the tool.
 
 | Command | Does |
@@ -68,6 +71,7 @@ This can also be used to control which fork is used, though only upstream `qmk_f
 | `make backup` | Full-flash image of both halves into `~/git/keyboard/backups/<timestamp>/` |
 | `make restore BACKUP=<dir>` | Write a backup back, each image to its own half |
 | `make drill` | Back up, then restore straight back, to prove recovery works |
+| `make draw` | Redraw the keymap picture from `keymap.json` |
 
 Bootloader: double-tap the half's reset button with the USB cable in that half, or hold the inner top-row key ("5" left, "6" right) while plugging it in. Only plug or unplug the cable between the halves with USB disconnected. A half left in bootloader mode is safe; `picotool reboot` or `make restore` brings it back.
 

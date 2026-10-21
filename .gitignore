@@ -17,3 +17,4 @@ compile_commands.json
 
 # kbflash binary, built by make
 /tools/kbflash/kbflash
+__pycache__/
