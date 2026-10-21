@@ -66,7 +66,7 @@ This can also be used to control which fork is used, though only upstream `qmk_f
 |---|---|
 | `make backup` | Full-flash image of both halves into `~/git/keyboard/backups/<timestamp>/` |
 | `make restore BACKUP=<dir>` | Write a backup back, each image to its own half |
-| `make flash [ERASE=1]` | Build `KB`/`KM` for `CONVERT_TO=liatris` and flash both halves; `ERASE=1` clears stored settings first |
+| `make flash [ERASE=1]` | Build `KB`/`KM` for `CONVERT_TO=liatris` and flash both halves; `ERASE=1` clears stored settings first (erases the 2 MB firmware region) |
 | `make drill [EXPECT_VIL=<file>]` | Back up, restore straight back, then check the Vial layout still matches |
 
 Bootloader: double-tap the half's reset button, or hold the inner top-row key ("5" left, "6" right) while plugging that half in. Only plug or unplug the cable between the halves with USB disconnected. A half left in bootloader mode is safe; `picotool reboot` or `make restore` brings it back.

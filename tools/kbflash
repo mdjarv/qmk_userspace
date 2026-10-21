@@ -18,8 +18,10 @@ import hashlib
 import json
 import os
 import shutil
+import struct
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -40,6 +42,14 @@ HINT_AFTER = 15
 BOOTSEL_TIMEOUT = 180
 APP_TIMEOUT = 30
 ACCESS_TIMEOUT = 10
+
+# QMK on this board assumes 2 MB of flash: firmware sits at the start and the
+# wear-leveled settings at the end of those 2 MB. Erasing this range clears
+# everything firmware writes, in ~30 s instead of minutes for all 16 MB.
+FIRMWARE_REGION = (0x10000000, 0x10200000)
+
+UF2_BLOCK = 512
+UF2_HEADER = struct.Struct("<IIIIIIII")
 
 
 class Abort(Exception):
@@ -180,12 +190,47 @@ def reboot(fid):
         say("Warning: keyboard not seen on USB after reboot")
 
 
+def sparse_uf2(image, out):
+    """Copy a UF2 without its blank (all 0xFF) blocks; returns blocks kept.
+
+    A full-flash backup is 16 MB, nearly all blank. Writing only the data
+    blocks after an erase gives the same flash in seconds.
+    """
+    data = image.read_bytes()
+    blocks = []
+    for i in range(0, len(data), UF2_BLOCK):
+        block = data[i:i + UF2_BLOCK]
+        size = UF2_HEADER.unpack_from(block)[4]
+        if block[32:32 + size] != b"\xff" * size:
+            blocks.append(bytearray(block))
+    for n, block in enumerate(blocks):
+        start0, start1, flags, addr, size, _, _, family = UF2_HEADER.unpack_from(block)
+        UF2_HEADER.pack_into(block, 0, start0, start1, flags, addr, size, n, len(blocks), family)
+    out.write_bytes(b"".join(blocks))
+    return len(blocks)
+
+
+def erase_firmware_region(fid):
+    say("Erasing ...")
+    start, end = FIRMWARE_REGION
+    picotool("erase", "-r", hex(start), hex(end), fid=fid)
+
+
 def write_image(fid, image, erase=False):
     if erase:
-        say("Erasing ...")
-        picotool("erase", "-a", fid=fid)
+        erase_firmware_region(fid)
     say(f"Writing {image.name} ...")
     picotool("load", "-v", str(image), fid=fid)
+
+
+def restore_image(fid, image):
+    """Bring a half back to a full-flash backup: erase, then write its data blocks."""
+    with tempfile.TemporaryDirectory() as tmp:
+        sparse = Path(tmp) / image.name
+        sparse_uf2(image, sparse)
+        erase_firmware_region(fid)
+        say(f"Writing {image.name} ...")
+        picotool("load", "-v", str(sparse), fid=fid)
 
 
 def parse_sides(value):
@@ -235,7 +280,7 @@ def do_restore(backup, sides):
     for side in sides:
         entry = manifest["sides"][side]
         fid = enter_bootsel(side, expect_id=entry["flash_id"])
-        write_image(fid, backup / entry["file"])
+        restore_image(fid, backup / entry["file"])
         reboot(fid)
 
 
