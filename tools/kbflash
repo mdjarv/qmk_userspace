@@ -3,8 +3,7 @@
 
 Walks through each half in turn: tells you where the USB cable goes and when
 to enter the bootloader, then drives picotool. Each half is identified by its
-RP2040 flash ID (the BOOTSEL USB serial), so a backup can only be restored to
-the half it came from.
+RP2040 flash ID, so a backup can only be restored to the half it came from.
 
   kbflash backup                 full-flash image of both halves
   kbflash restore DIR            write a backup back, each image to its own half
@@ -74,12 +73,7 @@ def usb_devices():
             pid = (d / "idProduct").read_text().strip()
         except OSError:
             continue
-        serial = d / "serial"
-        devices.append({
-            "vid": vid,
-            "pid": pid,
-            "serial": serial.read_text().strip() if serial.exists() else None,
-        })
+        devices.append({"vid": vid, "pid": pid})
     return devices
 
 
@@ -105,10 +99,10 @@ def wait_until(cond, timeout, hint=None):
     return None
 
 
-def picotool(*args, serial=None, capture=False):
+def picotool(*args, fid=None, capture=False):
     cmd = [PICOTOOL, *args]
-    if serial:
-        cmd += ["--ser", serial]
+    if fid:
+        cmd += ["--ser", fid]
     if capture:
         res = subprocess.run(cmd, capture_output=True, text=True)
     else:
@@ -127,19 +121,19 @@ def sha256(path):
     return h.hexdigest()
 
 
-def enter_bootsel(side, expect_serial=None):
-    """Guide one half into BOOTSEL and return its serial (flash ID)."""
+def enter_bootsel(side, expect_id=None):
+    """Guide one half into BOOTSEL and return its flash ID."""
     S = side.upper()
     waiting = bootsel_devices()
     if len(waiting) > 1:
         raise Abort("more than one device in bootloader mode")
     if waiting:
         # e.g. a half left in the bootloader by an earlier failed run
-        serial = waiting[0]["serial"]
-        if expect_serial and serial and serial != expect_serial:
+        fid = flash_id()
+        if expect_id and fid != expect_id:
             raise Abort(f"half in bootloader is not the {side} half of this backup")
         if confirm(f"A half is already in bootloader. Is it {S}?"):
-            return serial
+            return fid
         raise Abort("reboot it first (picotool reboot)")
 
     while True:
@@ -151,45 +145,47 @@ def enter_bootsel(side, expect_serial=None):
             raise Abort("bootloader did not appear")
         if len(found) > 1:
             raise Abort("more than one device in bootloader mode")
-        serial = found[0]["serial"]
-        if expect_serial and serial and serial != expect_serial:
+        fid = flash_id()
+        if expect_id and fid != expect_id:
             say(f"Wrong half, not {S}. Rebooting it unchanged")
-            reboot(serial)
+            reboot(fid)
             continue
-        if expect_serial and not serial:
-            if not confirm(f"Can't identify the half. Is it {S}?"):
-                reboot(serial)
-                raise Abort("cancelled")
-        wait_accessible(serial)
-        return serial
+        return fid
 
 
-def wait_accessible(serial):
-    """Wait until udev has granted access, which lags the device appearing."""
+def flash_id():
+    """Flash ID of the one half in BOOTSEL; picotool --ser matches this on RP2040.
+
+    Retries because udev grants access a moment after the device appears.
+    """
     subprocess.run(["udevadm", "settle", "-t", "5"], capture_output=True)
-    cmd = [PICOTOOL, "info"] + (["--ser", serial] if serial else [])
     deadline = time.monotonic() + ACCESS_TIMEOUT
     while time.monotonic() < deadline:
-        if subprocess.run(cmd, capture_output=True).returncode == 0:
-            return
+        res = subprocess.run([PICOTOOL, "info", "-d"], capture_output=True, text=True)
+        if res.returncode == 0:
+            for line in res.stdout.splitlines():
+                key, _, value = line.strip().partition(":")
+                if key == "flash id":
+                    return value.strip().removeprefix("0x").upper()
+            raise Abort("picotool info -d did not report a flash id")
         time.sleep(0.5)
     raise Abort("picotool cannot access the half in bootloader (permissions? see 60-picotool.rules)")
 
 
-def reboot(serial):
-    picotool("reboot", "-a", serial=serial)
+def reboot(fid):
+    picotool("reboot", "-a", fid=fid)
     if not wait_until(lambda: not bootsel_devices(), APP_TIMEOUT):
         raise Abort("device stayed in bootloader mode after reboot")
     if not wait_until(app_present, APP_TIMEOUT):
         say("Warning: keyboard not seen on USB after reboot")
 
 
-def write_image(serial, image, erase=False):
+def write_image(fid, image, erase=False):
     if erase:
         say("Erasing ...")
-        picotool("erase", "-a", serial=serial)
+        picotool("erase", "-a", fid=fid)
     say(f"Writing {image.name} ...")
-    picotool("load", "-v", str(image), serial=serial)
+    picotool("load", "-v", str(image), fid=fid)
 
 
 def parse_sides(value):
@@ -213,15 +209,15 @@ def do_backup(sides, label=None, root=BACKUP_ROOT):
     manifest = {"created": stamp, "sides": {}}
     say(f"Backup to {out}")
     for side in sides:
-        serial = enter_bootsel(side)
-        (out / f"{side}-info.txt").write_text(picotool("info", "-a", serial=serial, capture=True))
+        fid = enter_bootsel(side)
+        (out / f"{side}-info.txt").write_text(picotool("info", "-a", fid=fid, capture=True))
         image = out / f"{side}.uf2"
         say("Reading flash ...")
-        picotool("save", "-a", "-v", str(image), serial=serial)
+        picotool("save", "-a", "-v", str(image), fid=fid)
         digest = sha256(image)
-        manifest["sides"][side] = {"file": image.name, "sha256": digest, "serial": serial}
+        manifest["sides"][side] = {"file": image.name, "sha256": digest, "flash_id": fid}
         (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        reboot(serial)
+        reboot(fid)
     return out
 
 
@@ -238,9 +234,9 @@ def do_restore(backup, sides):
     say(f"Restore from {backup}")
     for side in sides:
         entry = manifest["sides"][side]
-        serial = enter_bootsel(side, expect_serial=entry["serial"])
-        write_image(serial, backup / entry["file"])
-        reboot(serial)
+        fid = enter_bootsel(side, expect_id=entry["flash_id"])
+        write_image(fid, backup / entry["file"])
+        reboot(fid)
 
 
 def cmd_backup(args):
@@ -262,9 +258,9 @@ def cmd_flash(args):
             raise Abort("cancelled")
     say(f"Flash {image.name}" + (" (erasing stored settings)" if args.erase else ""))
     for side in args.sides:
-        serial = enter_bootsel(side)
-        write_image(serial, image, erase=args.erase)
-        reboot(serial)
+        fid = enter_bootsel(side)
+        write_image(fid, image, erase=args.erase)
+        reboot(fid)
     finish(args.sides[-1])
 
 
