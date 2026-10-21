@@ -245,12 +245,12 @@ def cmd_backup(args):
 
 
 def cmd_restore(args):
-    do_restore(Path(args.backup), args.sides)
+    do_restore(Path(args.backup).expanduser(), args.sides)
     finish(args.sides[-1])
 
 
 def cmd_flash(args):
-    image = Path(args.firmware)
+    image = Path(args.firmware).expanduser()
     if not image.is_file():
         raise Abort(f"{image} not found")
     if set(args.sides) != set(SIDES):
@@ -272,7 +272,7 @@ def vial_dump(out):
 
 
 def cmd_vial_dump(args):
-    vial_dump(Path(args.out))
+    vial_dump(Path(args.out).expanduser())
 
 
 def cmd_drill(args):
@@ -280,7 +280,7 @@ def cmd_drill(args):
     do_restore(backup, list(SIDES))
     prompt("USB cable back in LEFT half")
     if args.expect_vil:
-        expected = Path(args.expect_vil)
+        expected = Path(args.expect_vil).expanduser()
         out = backup / "after-restore.vil"
         if not wait_until(app_present, APP_TIMEOUT):
             raise Abort("keyboard not found on USB")
