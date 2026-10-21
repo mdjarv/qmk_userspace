@@ -60,7 +60,7 @@ This can also be used to control which fork is used, though only upstream `qmk_f
 
 ## Flashing the Sofle (mdjarv)
 
-`tools/kbflash` waits for each half to enter the bootloader, recognises it by its RP2040 flash ID (`kbflash.json`) and drives `picotool`, so no keypress is needed mid-run. A backup only restores to the half it came from. Needs `picotool` (AUR).
+`tools/kbflash` waits for each half to enter the bootloader, recognises it by its RP2040 flash ID (`kbflash.json`) and drives `picotool`, so no keypress is needed mid-run. A backup only restores to the half it came from. Needs `picotool` (AUR) and Go; `make` builds the tool.
 
 | Command | Does |
 |---|---|
