@@ -2,6 +2,15 @@
 #include QMK_KEYBOARD_H
 #include "layers.h"
 
+#ifdef CONVERT_TO_LIATRIS
+// The Liatris LED on GP24 is lit by default; it is active low. splitkb's Vial
+// builds turned it off the same way.
+void keyboard_pre_init_user(void) {
+    gpio_set_pin_output(GP24);
+    gpio_write_pin_high(GP24);
+}
+#endif
+
 const uint16_t PROGMEM keymaps[][MATRIX_ROWS][MATRIX_COLS] = {
     [_DEFAULT] = LAYOUT(
         KC_ESC,         KC_1,           KC_2,           KC_3,           KC_4,           KC_5,                                           KC_6,           KC_7,           KC_8,           KC_9,           KC_0,           KC_BSPC,
