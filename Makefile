@@ -33,7 +33,7 @@ restore:
 	$(KBFLASH) restore "$(BACKUP)"
 
 drill:
-	$(KBFLASH) drill $(if $(EXPECT_VIL),--expect-vil "$(EXPECT_VIL)")
+	$(KBFLASH) drill
 
 build:
 	$(QMK_BIN) compile -kb $(KB) -km $(KM)

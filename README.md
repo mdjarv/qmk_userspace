@@ -60,13 +60,15 @@ This can also be used to control which fork is used, though only upstream `qmk_f
 
 ## Flashing the Sofle (mdjarv)
 
-`tools/kbflash` walks through each half in turn: where the USB cable goes, when to enter the bootloader, then drives `picotool`. Each half is identified by its RP2040 flash ID, so a backup only restores to the half it came from. Needs `picotool` (AUR).
+`tools/kbflash` waits for each half to enter the bootloader, recognises it by its RP2040 flash ID (`kbflash.json`) and drives `picotool`, so no keypress is needed mid-run. A backup only restores to the half it came from. Needs `picotool` (AUR).
 
 | Command | Does |
 |---|---|
+| `make flash [ERASE=1]` | Build `KB`/`KM` and flash both halves; `ERASE=1` clears stored settings first (erases the 2 MB firmware region) |
 | `make backup` | Full-flash image of both halves into `~/git/keyboard/backups/<timestamp>/` |
 | `make restore BACKUP=<dir>` | Write a backup back, each image to its own half |
-| `make flash [ERASE=1]` | Build `KB`/`KM` and flash both halves; `ERASE=1` clears stored settings first (erases the 2 MB firmware region) |
-| `make drill [EXPECT_VIL=<file>]` | Back up, restore straight back, then check the Vial layout still matches |
+| `make drill` | Back up, then restore straight back, to prove recovery works |
 
-Bootloader: double-tap the half's reset button, or hold the inner top-row key ("5" left, "6" right) while plugging that half in. Only plug or unplug the cable between the halves with USB disconnected. A half left in bootloader mode is safe; `picotool reboot` or `make restore` brings it back.
+Bootloader: double-tap the half's reset button with the USB cable in that half, or hold the inner top-row key ("5" left, "6" right) while plugging it in. Only plug or unplug the cable between the halves with USB disconnected. A half left in bootloader mode is safe; `picotool reboot` or `make restore` brings it back.
+
+Rollback to the last Vial firmware and layout: `make restore BACKUP=~/git/keyboard/backups/20261021-083326-drill`

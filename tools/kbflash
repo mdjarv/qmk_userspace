@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Guided backup, restore and flashing of a split RP2040 keyboard.
 
-Walks through each half in turn: tells you where the USB cable goes and when
-to enter the bootloader, then drives picotool. Each half is identified by its
-RP2040 flash ID, so a backup can only be restored to the half it came from.
+Waits for each half to enter the bootloader, recognises it by its RP2040 flash
+ID (listed in kbflash.json), drives picotool and reboots it. No keypress is
+needed mid-run, since the keyboard is down while a half is in the bootloader.
+A backup can only be restored to the half it came from.
 
   kbflash backup                 full-flash image of both halves
   kbflash restore DIR            write a backup back, each image to its own half
   kbflash flash FIRMWARE.uf2     flash the same firmware to both halves
   kbflash drill                  backup, then restore it, to prove the hatch works
-  kbflash vial-dump OUT.vil      save the live Vial layout (Vial firmware only)
 """
 
 import argparse
@@ -26,20 +26,14 @@ import time
 from pathlib import Path
 
 BOOTSEL_ID = ("2e8a", "0003")
-APP_VENDOR = "8d1d"  # splitkb.com
-SIDES = {
-    # bootmagic key: inner top-row key, held while plugging in that half
-    "left": {"bootmagic": '"5"'},
-    "right": {"bootmagic": '"6"'},
-}
 
 SYSFS = Path(os.environ.get("KBFLASH_SYSFS", "/sys"))
 PICOTOOL = os.environ.get("KBFLASH_PICOTOOL", "picotool")
 BACKUP_ROOT = Path(os.environ.get("KBFLASH_BACKUPS", Path.home() / "git/keyboard/backups"))
-TOOLS_DIR = Path(__file__).resolve().parent
+CONFIG = Path(os.environ.get("KBFLASH_CONFIG", Path(__file__).resolve().parent.parent / "kbflash.json"))
 
 HINT_AFTER = 15
-BOOTSEL_TIMEOUT = 180
+BOOTSEL_TIMEOUT = 300
 APP_TIMEOUT = 30
 ACCESS_TIMEOUT = 10
 
@@ -60,18 +54,18 @@ def say(msg=""):
     print(msg, flush=True)
 
 
-def prompt(msg):
-    try:
-        input(f"{msg} [Enter] ")
-    except EOFError:
-        raise Abort("input closed")
-
-
 def confirm(msg):
     try:
         return input(f"{msg} [y/N] ").strip().lower() == "y"
     except EOFError:
         raise Abort("input closed")
+
+
+def load_config():
+    """kbflash.json: {"app_vendor": "8d1d", "halves": {"left": {"flash_id", "bootmagic"}, ...}}"""
+    config = json.loads(CONFIG.read_text())
+    config["halves"] = {side: dict(h, flash_id=h["flash_id"].upper()) for side, h in config["halves"].items()}
+    return config
 
 
 def usb_devices():
@@ -89,10 +83,6 @@ def usb_devices():
 
 def bootsel_devices():
     return [d for d in usb_devices() if (d["vid"], d["pid"]) == BOOTSEL_ID]
-
-
-def app_present():
-    return any(d["vid"] == APP_VENDOR for d in usb_devices())
 
 
 def wait_until(cond, timeout, hint=None):
@@ -131,38 +121,6 @@ def sha256(path):
     return h.hexdigest()
 
 
-def enter_bootsel(side, expect_id=None):
-    """Guide one half into BOOTSEL and return its flash ID."""
-    S = side.upper()
-    waiting = bootsel_devices()
-    if len(waiting) > 1:
-        raise Abort("more than one device in bootloader mode")
-    if waiting:
-        # e.g. a half left in the bootloader by an earlier failed run
-        fid = flash_id()
-        if expect_id and fid != expect_id:
-            raise Abort(f"half in bootloader is not the {side} half of this backup")
-        if confirm(f"A half is already in bootloader. Is it {S}?"):
-            return fid
-        raise Abort("reboot it first (picotool reboot)")
-
-    while True:
-        prompt(f"USB cable in {S} half")
-        say(f"Double-tap reset button on {S} half")
-        hint = f"Not detected. Or: unplug USB, hold {SIDES[side]['bootmagic']}, plug in"
-        found = wait_until(bootsel_devices, BOOTSEL_TIMEOUT, hint)
-        if not found:
-            raise Abort("bootloader did not appear")
-        if len(found) > 1:
-            raise Abort("more than one device in bootloader mode")
-        fid = flash_id()
-        if expect_id and fid != expect_id:
-            say(f"Wrong half, not {S}. Rebooting it unchanged")
-            reboot(fid)
-            continue
-        return fid
-
-
 def flash_id():
     """Flash ID of the one half in BOOTSEL; picotool --ser matches this on RP2040.
 
@@ -182,12 +140,56 @@ def flash_id():
     raise Abort("picotool cannot access the half in bootloader (permissions? see 60-picotool.rules)")
 
 
-def reboot(fid):
+def reboot(fid, app_vendor):
     picotool("reboot", "-a", fid=fid)
     if not wait_until(lambda: not bootsel_devices(), APP_TIMEOUT):
         raise Abort("device stayed in bootloader mode after reboot")
-    if not wait_until(app_present, APP_TIMEOUT):
+    if not wait_until(lambda: any(d["vid"] == app_vendor for d in usb_devices()), APP_TIMEOUT):
         say("Warning: keyboard not seen on USB after reboot")
+
+
+def each_half(config, sides, action, ids=None, finish=True):
+    """Run action(side, fid) on each half as it shows up in the bootloader.
+
+    ids maps side -> flash ID (default: kbflash.json). Halves are recognised
+    by flash ID, so they can come in any order; one not in this run is
+    rebooted unchanged.
+    """
+    ids = ids or {side: h["flash_id"] for side, h in config["halves"].items()}
+    by_id = {fid: side for side, fid in ids.items()}
+    pending = list(sides)
+    say(f"USB cable in {pending[0].upper()} half, double-tap its reset button")
+    last = None
+    while pending:
+        nxt = pending[0]
+        hint = (f"Not detected. Or: unplug USB, hold {config['halves'][nxt]['bootmagic']} "
+                f"on the {nxt.upper()} half, plug it in")
+        found = wait_until(bootsel_devices, BOOTSEL_TIMEOUT, hint)
+        if not found:
+            raise Abort("bootloader did not appear")
+        if len(found) > 1:
+            raise Abort("more than one device in bootloader mode")
+        fid = flash_id()
+        side = by_id.get(fid)
+        if side is None:
+            raise Abort(f"unknown half, flash ID {fid}; add it to {CONFIG.name}")
+        if side not in pending:
+            say(f"{side.upper()} half is not pending, rebooting it unchanged")
+            reboot(fid, config["app_vendor"])
+            continue
+        say(f"{side.upper()} half:")
+        action(side, fid)
+        reboot(fid, config["app_vendor"])
+        pending.remove(side)
+        last = side
+        if pending:
+            say(f"Move USB cable to {pending[0].upper()} half, double-tap its reset button")
+    if not finish:
+        return
+    if last != "left":
+        say("Done. Move USB cable back to LEFT half")
+    else:
+        say("Done")
 
 
 def sparse_uf2(image, out):
@@ -216,160 +218,125 @@ def erase_firmware_region(fid):
     picotool("erase", "-r", hex(start), hex(end), fid=fid)
 
 
-def write_image(fid, image, erase=False):
-    if erase:
-        erase_firmware_region(fid)
-    say(f"Writing {image.name} ...")
-    picotool("load", "-v", str(image), fid=fid)
-
-
-def restore_image(fid, image):
-    """Bring a half back to a full-flash backup: erase, then write its data blocks."""
-    with tempfile.TemporaryDirectory() as tmp:
-        sparse = Path(tmp) / image.name
-        sparse_uf2(image, sparse)
-        erase_firmware_region(fid)
-        say(f"Writing {image.name} ...")
-        picotool("load", "-v", str(sparse), fid=fid)
-
-
 def parse_sides(value):
-    sides = [s.strip() for s in value.split(",") if s.strip()]
-    for s in sides:
-        if s not in SIDES:
-            raise argparse.ArgumentTypeError(f"unknown side {s!r}, expected {', '.join(SIDES)}")
-    return sides
+    return [s.strip() for s in value.split(",") if s.strip()]
 
 
-def finish(last_side):
-    if last_side != "left":
-        prompt("USB cable back in LEFT half")
-    say("Done")
+def check_sides(config, sides):
+    unknown = [s for s in sides if s not in config["halves"]]
+    if unknown:
+        raise Abort(f"unknown side {', '.join(unknown)}; {CONFIG.name} has {', '.join(config['halves'])}")
 
 
-def do_backup(sides, label=None, root=BACKUP_ROOT):
+def do_backup(config, sides, label=None, root=BACKUP_ROOT, finish=True):
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     out = root / (f"{stamp}-{label}" if label else stamp)
     out.mkdir(parents=True)
     manifest = {"created": stamp, "sides": {}}
     say(f"Backup to {out}")
-    for side in sides:
-        fid = enter_bootsel(side)
+
+    def backup(side, fid):
         (out / f"{side}-info.txt").write_text(picotool("info", "-a", fid=fid, capture=True))
         image = out / f"{side}.uf2"
         say("Reading flash ...")
         picotool("save", "-a", "-v", str(image), fid=fid)
-        digest = sha256(image)
-        manifest["sides"][side] = {"file": image.name, "sha256": digest, "flash_id": fid}
+        manifest["sides"][side] = {"file": image.name, "sha256": sha256(image), "flash_id": fid}
         (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        reboot(fid)
+
+    each_half(config, sides, backup, finish=finish)
     return out
 
 
-def do_restore(backup, sides):
+def do_restore(config, backup, sides):
     manifest = json.loads((backup / "manifest.json").read_text())
     missing = [s for s in sides if s not in manifest["sides"]]
     if missing:
         raise Abort(f"backup has no image for {', '.join(missing)}")
     for side in sides:
         entry = manifest["sides"][side]
-        image = backup / entry["file"]
-        if sha256(image) != entry["sha256"]:
-            raise Abort(f"{image} does not match its recorded checksum")
+        if sha256(backup / entry["file"]) != entry["sha256"]:
+            raise Abort(f"{backup / entry['file']} does not match its recorded checksum")
     say(f"Restore from {backup}")
-    for side in sides:
-        entry = manifest["sides"][side]
-        fid = enter_bootsel(side, expect_id=entry["flash_id"])
-        restore_image(fid, backup / entry["file"])
-        reboot(fid)
+
+    def restore(side, fid):
+        image = backup / manifest["sides"][side]["file"]
+        with tempfile.TemporaryDirectory() as tmp:
+            sparse = Path(tmp) / image.name
+            sparse_uf2(image, sparse)
+            erase_firmware_region(fid)
+            say(f"Writing {image.name} ...")
+            picotool("load", "-v", str(sparse), fid=fid)
+
+    each_half(config, sides, restore, ids={s: e["flash_id"] for s, e in manifest["sides"].items()})
 
 
-def cmd_backup(args):
-    do_backup(args.sides, args.label)
-    finish(args.sides[-1])
+def cmd_backup(config, args):
+    do_backup(config, args.sides, args.label)
 
 
-def cmd_restore(args):
-    do_restore(Path(args.backup).expanduser(), args.sides)
-    finish(args.sides[-1])
+def cmd_restore(config, args):
+    do_restore(config, Path(args.backup).expanduser(), args.sides)
 
 
-def cmd_flash(args):
+def cmd_flash(config, args):
     image = Path(args.firmware).expanduser()
     if not image.is_file():
         raise Abort(f"{image} not found")
-    if set(args.sides) != set(SIDES):
+    if set(args.sides) != set(config["halves"]):
         if not confirm("Halves must run the same firmware. Flash only " + ", ".join(args.sides) + "?"):
             raise Abort("cancelled")
     say(f"Flash {image.name}" + (" (erasing stored settings)" if args.erase else ""))
-    for side in args.sides:
-        fid = enter_bootsel(side)
-        write_image(fid, image, erase=args.erase)
-        reboot(fid)
-    finish(args.sides[-1])
+
+    def flash(side, fid):
+        if args.erase:
+            erase_firmware_region(fid)
+        say(f"Writing {image.name} ...")
+        picotool("load", "-v", str(image), fid=fid)
+
+    each_half(config, args.sides, flash)
 
 
-def vial_dump(out):
-    script = TOOLS_DIR / "vial_dump.py"
-    res = subprocess.run([sys.executable, str(script), str(out)])
-    if res.returncode != 0:
-        raise Abort("Vial layout dump failed")
-
-
-def cmd_vial_dump(args):
-    vial_dump(Path(args.out).expanduser())
-
-
-def cmd_drill(args):
-    backup = do_backup(list(SIDES), "drill")
-    do_restore(backup, list(SIDES))
-    prompt("USB cable back in LEFT half")
-    if args.expect_vil:
-        expected = Path(args.expect_vil).expanduser()
-        out = backup / "after-restore.vil"
-        if not wait_until(app_present, APP_TIMEOUT):
-            raise Abort("keyboard not found on USB")
-        vial_dump(out)
-        if sha256(out) != sha256(expected):
-            raise Abort(f"layout differs from {expected}; compare {out}")
-        say("Layout matches")
+def cmd_drill(config, args):
+    sides = list(config["halves"])
+    backup = do_backup(config, sides, "drill", finish=False)
+    # restore starts with the half the cable is already in
+    do_restore(config, backup, sides[::-1])
     say(f"Drill passed: {backup}")
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = parser.add_subparsers(dest="cmd", required=True)
-    all_sides = ",".join(SIDES)
+    sides_help = "comma-separated, default all halves in kbflash.json"
 
     p = sub.add_parser("backup", help="full-flash image of each half")
-    p.add_argument("--sides", type=parse_sides, default=list(SIDES), help=f"default {all_sides}")
+    p.add_argument("--sides", type=parse_sides, help=sides_help)
     p.add_argument("--label", help="suffix for the backup directory")
     p.set_defaults(func=cmd_backup)
 
     p = sub.add_parser("restore", help="write a backup back to its halves")
     p.add_argument("backup", help="backup directory (contains manifest.json)")
-    p.add_argument("--sides", type=parse_sides, default=list(SIDES), help=f"default {all_sides}")
+    p.add_argument("--sides", type=parse_sides, help=sides_help)
     p.set_defaults(func=cmd_restore)
 
     p = sub.add_parser("flash", help="flash one firmware image to both halves")
     p.add_argument("firmware", help=".uf2 firmware file")
-    p.add_argument("--sides", type=parse_sides, default=list(SIDES), help=f"default {all_sides}")
-    p.add_argument("--erase", action="store_true", help="erase all flash first, clearing stored settings")
+    p.add_argument("--sides", type=parse_sides, help=sides_help)
+    p.add_argument("--erase", action="store_true", help="erase the firmware region first, clearing stored settings")
     p.set_defaults(func=cmd_flash)
 
     p = sub.add_parser("drill", help="backup then restore, to prove recovery works")
-    p.add_argument("--expect-vil", help="Vial layout file the keyboard must still match afterwards")
     p.set_defaults(func=cmd_drill)
 
-    p = sub.add_parser("vial-dump", help="save the live Vial layout")
-    p.add_argument("out", help="output .vil file")
-    p.set_defaults(func=cmd_vial_dump)
-
     args = parser.parse_args()
-    if args.cmd != "vial-dump" and not shutil.which(PICOTOOL):
+    if not shutil.which(PICOTOOL):
         sys.exit(f"kbflash: {PICOTOOL} not found")
     try:
-        args.func(args)
+        config = load_config()
+        if hasattr(args, "sides"):
+            args.sides = args.sides or list(config["halves"])
+            check_sides(config, args.sides)
+        args.func(config, args)
     except Abort as e:
         say(f"\nkbflash: stopped: {e}")
         if bootsel_devices():
