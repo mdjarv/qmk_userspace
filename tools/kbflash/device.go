@@ -115,18 +115,19 @@ func stageName(prefix string) string {
 }
 
 // runPicotool runs picotool against the half with flash ID fid, reporting its
-// progress bars through onProgress. Output is kept for the error message.
+// progress bars through onProgress, and returns the rest of its stdout.
 func runPicotool(ctx context.Context, fid string, onProgress func(stage string, pct int), args ...string) (string, error) {
 	if fid != "" {
 		args = append(args, "--ser", fid)
 	}
 	cmd := exec.CommandContext(ctx, picotool, args...)
-	var out bytes.Buffer
+	// separate buffers: exec owns stderr's writer until Wait returns
+	var out, stderr bytes.Buffer
 	pipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return "", err
 	}
-	cmd.Stderr = &out
+	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		return "", err
 	}
@@ -147,7 +148,7 @@ func runPicotool(ctx context.Context, fid string, onProgress func(stage string, 
 		if ctx.Err() != nil {
 			return out.String(), ctx.Err()
 		}
-		return out.String(), fmt.Errorf("picotool %s failed (%v): %s", args[0], err, lastLine(out.String()))
+		return out.String(), fmt.Errorf("picotool %s failed (%v): %s", args[0], err, lastLine(stderr.String()+out.String()))
 	}
 	return out.String(), nil
 }

@@ -201,3 +201,14 @@ func TestSparseUF2KeepsOnlyDataBlocks(t *testing.T) {
 		}
 	}
 }
+
+func TestRunPicotoolReturnsStdout(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "picotool")
+	must(t, os.WriteFile(script, []byte("#!/bin/bash\nprintf 'Device Information\\n flash id:    0xABC\\n'\necho warning >&2\n"), 0o755))
+	picotool = script
+	out, err := runPicotool(context.Background(), "", nil, "info", "-a")
+	must(t, err)
+	if !strings.Contains(out, "flash id:    0xABC") {
+		t.Fatalf("stdout lost: %q", out)
+	}
+}
