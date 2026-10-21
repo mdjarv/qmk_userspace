@@ -17,11 +17,11 @@ ifeq ($(QMK_FIRMWARE_ROOT),)
 endif
 
 # Guided backup / restore / flash of the Sofle, see tools/kbflash
+# (the keymap's rules.mk sets CONVERT_TO=liatris)
 KB ?= splitkb/aurora/sofle_v2/rev1
 KM ?= mdjarv
-CONVERT_TO ?= liatris
 KBFLASH := $(QMK_USERSPACE)/tools/kbflash
-FIRMWARE := $(QMK_USERSPACE)/$(subst /,_,$(KB))_$(KM)_$(CONVERT_TO).uf2
+FIRMWARE := $(QMK_USERSPACE)/$(subst /,_,$(KB))_$(KM).uf2
 
 .PHONY: backup restore drill build flash
 
@@ -36,7 +36,7 @@ drill:
 	$(KBFLASH) drill $(if $(EXPECT_VIL),--expect-vil "$(EXPECT_VIL)")
 
 build:
-	$(QMK_BIN) compile -kb $(KB) -km $(KM) -e CONVERT_TO=$(CONVERT_TO)
+	$(QMK_BIN) compile -kb $(KB) -km $(KM)
 
 flash: build
 	$(KBFLASH) flash "$(FIRMWARE)" $(if $(ERASE),--erase)
