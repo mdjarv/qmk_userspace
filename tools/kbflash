@@ -40,6 +40,7 @@ TOOLS_DIR = Path(__file__).resolve().parent
 HINT_AFTER = 15
 BOOTSEL_TIMEOUT = 180
 APP_TIMEOUT = 30
+ACCESS_TIMEOUT = 10
 
 
 class Abort(Exception):
@@ -50,20 +51,16 @@ def say(msg=""):
     print(msg, flush=True)
 
 
-def step(msg):
-    say(f"\n>> {msg}")
-
-
 def prompt(msg):
     try:
-        input(f"   {msg} [Enter] ")
+        input(f"{msg} [Enter] ")
     except EOFError:
         raise Abort("input closed")
 
 
 def confirm(msg):
     try:
-        return input(f"   {msg} [y/N] ").strip().lower() == "y"
+        return input(f"{msg} [y/N] ").strip().lower() == "y"
     except EOFError:
         raise Abort("input closed")
 
@@ -102,7 +99,7 @@ def wait_until(cond, timeout, hint=None):
         if result:
             return result
         if hint and not hinted and time.monotonic() - start > HINT_AFTER:
-            say(f"\n   {hint}")
+            say(hint)
             hinted = True
         time.sleep(0.5)
     return None
@@ -132,70 +129,66 @@ def sha256(path):
 
 def enter_bootsel(side, expect_serial=None):
     """Guide one half into BOOTSEL and return its serial (flash ID)."""
-    other = [s for s in SIDES if s != side]
-    step(f"{side.upper()} half")
+    S = side.upper()
     waiting = bootsel_devices()
     if len(waiting) > 1:
         raise Abort("more than one device in bootloader mode")
     if waiting:
         # e.g. a half left in the bootloader by an earlier failed run
         serial = waiting[0]["serial"]
-        say(f"   A half is already in bootloader mode (flash ID {serial or 'unknown'}).")
         if expect_serial and serial and serial != expect_serial:
-            raise Abort(f"that is not the {side} half from this backup (expected {expect_serial})")
-        if confirm(f"Is it the {side.upper()} half, with the USB cable in it?"):
+            raise Abort(f"half in bootloader is not the {side} half of this backup")
+        if confirm(f"A half is already in bootloader. Is it {S}?"):
             return serial
-        raise Abort("reboot it first (picotool reboot), then run again")
-    say(f"   The USB cable must be in the {side.upper()} half.")
-    if other:
-        say(f"   If it is in the {other[0]} half: unplug USB first, then move it.")
-        say("   Never plug or unplug the cable between the halves while USB is connected.")
-    prompt("USB in place?")
+        raise Abort("reboot it first (picotool reboot)")
 
     while True:
-        say(f"   Double-tap the reset button on the {side.upper()} half.")
-        say("   The keyboard stops typing now; use the laptop keyboard.")
-        say("   Waiting for the bootloader ...")
-        hint = (f"Nothing yet. Tap twice within half a second, or unplug USB, hold "
-                f"{SIDES[side]['bootmagic']} on the {side} half and plug it back in.")
+        prompt(f"USB cable in {S} half")
+        say(f"Double-tap reset button on {S} half")
+        hint = f"Not detected. Or: unplug USB, hold {SIDES[side]['bootmagic']}, plug in"
         found = wait_until(bootsel_devices, BOOTSEL_TIMEOUT, hint)
         if not found:
             raise Abort("bootloader did not appear")
         if len(found) > 1:
             raise Abort("more than one device in bootloader mode")
         serial = found[0]["serial"]
-        say(f"   Bootloader found (flash ID {serial or 'unknown'}).")
         if expect_serial and serial and serial != expect_serial:
-            say(f"   That is not the {side} half from this backup (expected {expect_serial}).")
-            say("   Rebooting it unchanged.")
+            say(f"Wrong half, not {S}. Rebooting it unchanged")
             reboot(serial)
-            prompt(f"Check the cable is in the {side.upper()} half, then continue.")
             continue
         if expect_serial and not serial:
-            say("   Warning: cannot read the flash ID, so cannot check which half this is.")
-            if not confirm(f"Continue as the {side} half?"):
+            if not confirm(f"Can't identify the half. Is it {S}?"):
                 reboot(serial)
                 raise Abort("cancelled")
+        wait_accessible(serial)
         return serial
+
+
+def wait_accessible(serial):
+    """Wait until udev has granted access, which lags the device appearing."""
+    subprocess.run(["udevadm", "settle", "-t", "5"], capture_output=True)
+    cmd = [PICOTOOL, "info"] + (["--ser", serial] if serial else [])
+    deadline = time.monotonic() + ACCESS_TIMEOUT
+    while time.monotonic() < deadline:
+        if subprocess.run(cmd, capture_output=True).returncode == 0:
+            return
+        time.sleep(0.5)
+    raise Abort("picotool cannot access the half in bootloader (permissions? see 60-picotool.rules)")
 
 
 def reboot(serial):
     picotool("reboot", "-a", serial=serial)
-    gone = wait_until(lambda: not bootsel_devices(), APP_TIMEOUT)
-    if not gone:
+    if not wait_until(lambda: not bootsel_devices(), APP_TIMEOUT):
         raise Abort("device stayed in bootloader mode after reboot")
-    if wait_until(app_present, APP_TIMEOUT):
-        say("   Keyboard is back.")
-    else:
-        say("   Warning: the keyboard did not reappear on USB. It may still work as the "
-            "half without USB; check before continuing.")
+    if not wait_until(app_present, APP_TIMEOUT):
+        say("Warning: keyboard not seen on USB after reboot")
 
 
 def write_image(serial, image, erase=False):
     if erase:
-        say("   Erasing all flash ...")
+        say("Erasing ...")
         picotool("erase", "-a", serial=serial)
-    say(f"   Writing {image.name} ...")
+    say(f"Writing {image.name} ...")
     picotool("load", "-v", str(image), serial=serial)
 
 
@@ -209,9 +202,8 @@ def parse_sides(value):
 
 def finish(last_side):
     if last_side != "left":
-        step("Done. Unplug USB and move it back to the LEFT half.")
-    else:
-        step("Done.")
+        prompt("USB cable back in LEFT half")
+    say("Done")
 
 
 def do_backup(sides, label=None, root=BACKUP_ROOT):
@@ -219,17 +211,16 @@ def do_backup(sides, label=None, root=BACKUP_ROOT):
     out = root / (f"{stamp}-{label}" if label else stamp)
     out.mkdir(parents=True)
     manifest = {"created": stamp, "sides": {}}
-    say(f"Backing up {', '.join(sides)} to {out}")
+    say(f"Backup to {out}")
     for side in sides:
         serial = enter_bootsel(side)
         (out / f"{side}-info.txt").write_text(picotool("info", "-a", serial=serial, capture=True))
         image = out / f"{side}.uf2"
-        say("   Reading all flash (this takes a minute) ...")
+        say("Reading flash ...")
         picotool("save", "-a", "-v", str(image), serial=serial)
         digest = sha256(image)
         manifest["sides"][side] = {"file": image.name, "sha256": digest, "serial": serial}
         (out / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-        say(f"   Saved {image.name} sha256 {digest[:12]}")
         reboot(serial)
     return out
 
@@ -244,7 +235,7 @@ def do_restore(backup, sides):
         image = backup / entry["file"]
         if sha256(image) != entry["sha256"]:
             raise Abort(f"{image} does not match its recorded checksum")
-    say(f"Restoring {', '.join(sides)} from {backup}")
+    say(f"Restore from {backup}")
     for side in sides:
         entry = manifest["sides"][side]
         serial = enter_bootsel(side, expect_serial=entry["serial"])
@@ -267,12 +258,9 @@ def cmd_flash(args):
     if not image.is_file():
         raise Abort(f"{image} not found")
     if set(args.sides) != set(SIDES):
-        say("Warning: both halves must run the same firmware, or the split link fails.")
-        if not confirm("Flash only " + ", ".join(args.sides) + "?"):
+        if not confirm("Halves must run the same firmware. Flash only " + ", ".join(args.sides) + "?"):
             raise Abort("cancelled")
-    say(f"Flashing {image.name} (sha256 {sha256(image)[:12]}) to {', '.join(args.sides)}")
-    if args.erase:
-        say("Flash is erased first: settings stored on the keyboard are cleared.")
+    say(f"Flash {image.name}" + (" (erasing stored settings)" if args.erase else ""))
     for side in args.sides:
         serial = enter_bootsel(side)
         write_image(serial, image, erase=args.erase)
@@ -292,24 +280,19 @@ def cmd_vial_dump(args):
 
 
 def cmd_drill(args):
-    say("Drill: back up both halves, write each backup straight back, then check")
-    say("the keyboard still holds the same layout. Nothing new is flashed.")
     backup = do_backup(list(SIDES), "drill")
     do_restore(backup, list(SIDES))
-    step("Unplug USB and move it back to the LEFT half.")
-    prompt("USB back in the left half and the keyboard typing?")
+    prompt("USB cable back in LEFT half")
     if args.expect_vil:
         expected = Path(args.expect_vil)
         out = backup / "after-restore.vil"
-        step("Reading the layout over Vial ...")
         if not wait_until(app_present, APP_TIMEOUT):
             raise Abort("keyboard not found on USB")
         vial_dump(out)
-        if sha256(out) == sha256(expected):
-            say(f"   Layout identical to {expected.name}.")
-        else:
+        if sha256(out) != sha256(expected):
             raise Abort(f"layout differs from {expected}; compare {out}")
-    step(f"Drill passed. Backup kept in {backup}")
+        say("Layout matches")
+    say(f"Drill passed: {backup}")
 
 
 def main():
@@ -349,13 +332,12 @@ def main():
     except Abort as e:
         say(f"\nkbflash: stopped: {e}")
         if bootsel_devices():
-            say("A half is still in bootloader mode. It is safe to leave it there.")
-            say("To bring it back: picotool reboot   (or restore a backup with kbflash restore DIR)")
+            say("A half is still in bootloader (safe). Bring it back: picotool reboot, or kbflash restore DIR")
         sys.exit(1)
     except KeyboardInterrupt:
         say("\nkbflash: interrupted")
         if bootsel_devices():
-            say("A half is still in bootloader mode. To bring it back: picotool reboot")
+            say("A half is still in bootloader (safe). Bring it back: picotool reboot, or kbflash restore DIR")
         sys.exit(130)
 
 
