@@ -3,11 +3,14 @@
 #include "layers.h"
 
 #ifdef CONVERT_TO_LIATRIS
-// The Liatris LED on GP24 is lit by default; it is active low. splitkb's Vial
-// builds turned it off the same way.
+// The Liatris LED on GPIO 24 is lit by default; it is active low. splitkb's
+// Vial builds turned it off the same way. The converter's pin table has no
+// GPxx names, only Pro Micro ones, so the GPIO number is used directly.
+#    define LIATRIS_LED_PIN 24U
+
 void keyboard_pre_init_user(void) {
-    gpio_set_pin_output(GP24);
-    gpio_write_pin_high(GP24);
+    gpio_set_pin_output(LIATRIS_LED_PIN);
+    gpio_write_pin_high(LIATRIS_LED_PIN);
 }
 #endif
 
