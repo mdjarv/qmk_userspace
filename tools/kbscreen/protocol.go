@@ -109,7 +109,7 @@ type AgentRow struct {
 }
 
 type Agents struct {
-	Rows                    []AgentRow // at most agentRows are sent
+	Rows                   []AgentRow // at most agentRows are sent
 	Running, Waiting, Idle int
 }
 

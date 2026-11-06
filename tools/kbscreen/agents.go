@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"sort"
@@ -41,8 +42,22 @@ type readSession struct {
 	} `json:"needsYou"`
 }
 
-// newAgentiqueClient reads the server address from Agentique's config.toml
-// and trusts only the certificate at its tls-cert path.
+// newRemoteAgentiqueClient talks to an Agentique server elsewhere, such as
+// https://host.tailnet.ts.net:19201, verifying its certificate normally.
+func newRemoteAgentiqueClient(base, token string) (*agentiqueClient, error) {
+	u, err := url.Parse(base)
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
+		return nil, fmt.Errorf("agentique: bad URL %q, want https://host:port", base)
+	}
+	return &agentiqueClient{
+		base:  strings.TrimRight(base, "/"),
+		token: token,
+		http:  &http.Client{Timeout: 5 * time.Second},
+	}, nil
+}
+
+// newAgentiqueClient reads the local server's address from Agentique's
+// config.toml and trusts only the certificate at its tls-cert path.
 func newAgentiqueClient(configDir, token string) (*agentiqueClient, error) {
 	cfg, err := os.ReadFile(configDir + "/config.toml")
 	if err != nil {
@@ -55,7 +70,7 @@ func newAgentiqueClient(configDir, token string) (*agentiqueClient, error) {
 	port := addr[strings.LastIndex(addr, ":")+1:]
 	certPath := tomlString(cfg, "tls-cert")
 	if certPath == "" {
-		return &agentiqueClient{base: "http://127.0.0.1:" + port, token: token, http: http.DefaultClient}, nil
+		return &agentiqueClient{base: "http://127.0.0.1:" + port, token: token, http: &http.Client{Timeout: 5 * time.Second}}, nil
 	}
 	if !strings.HasPrefix(certPath, "/") {
 		certPath = configDir + "/" + certPath

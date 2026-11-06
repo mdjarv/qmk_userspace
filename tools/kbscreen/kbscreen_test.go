@@ -5,6 +5,8 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -192,5 +194,36 @@ func TestServeFramesReportsForHidraw(t *testing.T) {
 	last := data[7*(reportSize+1):]
 	if last[1] != msgMedia || last[7] != 40 {
 		t.Fatalf("last report % x", last)
+	}
+}
+
+// A server on another host: the URL is used as given and the token goes in
+// the Authorization header.
+func TestRemoteAgentiqueClient(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer aqt_test" {
+			http.Error(w, "no", http.StatusUnauthorized)
+			return
+		}
+		switch r.URL.Path {
+		case "/api/read/sessions":
+			w.Write([]byte(`{"sessions":[{"projectId":"p1","state":"running"}]}`))
+		case "/api/read/projects":
+			w.Write([]byte(`{"projects":[{"id":"p1","name":"QMK Userspace"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c, err := newRemoteAgentiqueClient(srv.URL+"/", "aqt_test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, err := c.agents(context.Background())
+	if err != nil || len(a.Rows) != 1 || a.Rows[0] != (AgentRow{"QMK", agentWorking}) {
+		t.Fatalf("agents = %+v, %v", a, err)
+	}
+	if _, err := newRemoteAgentiqueClient("host:19201", "x"); err == nil {
+		t.Fatal("a URL without a scheme must be refused")
 	}
 }

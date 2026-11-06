@@ -46,7 +46,9 @@ func (s *state) poke() {
 
 func main() {
 	home, _ := os.UserHomeDir()
-	agentiqueDir := flag.String("agentique-config", filepath.Join(home, ".config/agentique"), "Agentique config directory")
+	agentiqueDir := flag.String("agentique-config", filepath.Join(home, ".config/agentique"), "local Agentique config directory, used when no URL is given")
+	agentiqueURL := flag.String("agentique-url", os.Getenv("AGENTIQUE_URL"),
+		"Agentique server on another host, e.g. https://host.tailnet.ts.net:19201 (default $AGENTIQUE_URL; unset uses the local server)")
 	tokenFile := flag.String("token-file", filepath.Join(home, ".config/kbscreen/agentique-token"),
 		"file holding an Agentique read token (agentique tokens add --perm read); AGENTIQUE_TOKEN overrides")
 	dry := flag.Bool("dry", false, "print what would be sent once a second instead of sending it")
@@ -61,7 +63,7 @@ func main() {
 
 	go pollSys(ctx, st)
 	go watchMedia(ctx, st, spectrum)
-	if c := agentiqueFromConfig(*agentiqueDir, *tokenFile); c != nil {
+	if c := agentiqueFromConfig(*agentiqueURL, *agentiqueDir, *tokenFile); c != nil {
 		go pollAgents(ctx, st, c)
 	}
 
@@ -86,7 +88,7 @@ func main() {
 	}
 }
 
-func agentiqueFromConfig(dir, tokenFile string) *agentiqueClient {
+func agentiqueFromConfig(remote, dir, tokenFile string) *agentiqueClient {
 	token := os.Getenv("AGENTIQUE_TOKEN")
 	if token == "" {
 		b, err := os.ReadFile(tokenFile)
@@ -96,7 +98,13 @@ func agentiqueFromConfig(dir, tokenFile string) *agentiqueClient {
 		}
 		token = strings.TrimSpace(string(b))
 	}
-	c, err := newAgentiqueClient(dir, token)
+	var c *agentiqueClient
+	var err error
+	if remote != "" {
+		c, err = newRemoteAgentiqueClient(remote, token)
+	} else {
+		c, err = newAgentiqueClient(dir, token)
+	}
 	if err != nil {
 		log.Printf("agents: %v; the agent screen stays off", err)
 		return nil
