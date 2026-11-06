@@ -1,7 +1,9 @@
 package main
 
 import (
+	"cmp"
 	"embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -31,6 +33,13 @@ type renderer struct {
 	render goja.Callable
 	knob   goja.Callable
 	mtimes map[string]time.Time
+
+	// The scripts' global save object outlives a runtime: each fresh one
+	// (a reload) starts from the last JSON.stringify(save), and saveState
+	// writes it to savePath.
+	savePath             string
+	saveJSON, savedJSON  string // the latest, and what is on disk
+	checkedAt, writtenAt time.Time
 }
 
 func newRenderer(dir string) (*renderer, error) {
@@ -94,6 +103,11 @@ func (r *renderer) load() error {
 	vm := goja.New()
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	vm.Set("FONT_BUFFER", vm.NewArrayBuffer(glcdFont))
+	r.checkpoint()
+	vm.Set("SAVE_JSON", cmp.Or(r.saveJSON, "{}"))
+	if _, err := vm.RunString("globalThis.save = JSON.parse(SAVE_JSON)"); err != nil {
+		return err
+	}
 	names, err := r.scripts()
 	if err != nil {
 		return err
@@ -113,6 +127,68 @@ func (r *renderer) load() error {
 	}
 	knob, _ := goja.AssertFunction(vm.Get("knob"))
 	r.vm, r.render, r.knob, r.mtimes = vm, render, knob, mtimes
+	return nil
+}
+
+// persist keeps the save object in path (a missing file starts empty) and
+// reloads the scripts with it. A file that is not JSON is moved aside.
+func (r *renderer) persist(path string) error {
+	r.savePath = path
+	b, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if !json.Valid(b) {
+		os.Rename(path, path+".bad")
+		return fmt.Errorf("%s is not JSON; moved it to %s.bad and started over", path, path)
+	}
+	r.saveJSON, r.savedJSON = string(b), string(b)
+	if r.vm != nil { // load checkpoints the running scripts first: hand them the file
+		r.vm.Set("SAVE_JSON", r.saveJSON)
+		r.vm.RunString("globalThis.save = JSON.parse(SAVE_JSON)")
+	}
+	return r.load()
+}
+
+// checkpoint takes the running scripts' save object.
+func (r *renderer) checkpoint() {
+	if r.vm == nil {
+		return
+	}
+	v, err := runBounded(r.vm, func() (goja.Value, error) {
+		return r.vm.RunString("JSON.stringify(typeof save === 'object' && save !== null ? save : {})")
+	})
+	if err == nil {
+		r.saveJSON = v.String()
+	}
+}
+
+// saveState checkpoints once a second and writes a changed save every 10 s;
+// force does both now (on the way out).
+func (r *renderer) saveState(now time.Time, force bool) error {
+	if !force && now.Sub(r.checkedAt) < time.Second {
+		return nil
+	}
+	r.checkedAt = now
+	r.checkpoint()
+	if r.savePath == "" || r.saveJSON == r.savedJSON || (!force && now.Sub(r.writtenAt) < 10*time.Second) {
+		return nil
+	}
+	r.writtenAt = now
+	if err := os.MkdirAll(filepath.Dir(r.savePath), 0o755); err != nil {
+		return err
+	}
+	tmp := r.savePath + ".tmp"
+	if err := os.WriteFile(tmp, []byte(r.saveJSON), 0o644); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, r.savePath); err != nil {
+		return err
+	}
+	r.savedJSON = r.saveJSON
 	return nil
 }
 
@@ -243,6 +319,8 @@ type jsMedia struct {
 
 type jsAgents struct {
 	Rows         []jsAgentRow `json:"rows"`
+	Sessions     []jsSession  `json:"sessions"`
+	Totals       Totals       `json:"totals"`
 	Running      int          `json:"running"`
 	Waiting      int          `json:"waiting"`
 	LaterWaiting int          `json:"laterWaiting"`
@@ -252,12 +330,22 @@ type jsAgents struct {
 }
 
 type jsAgentRow struct {
+	ID    string `json:"id"`
 	Name  string `json:"name"`
 	State string `json:"state"` // working, waiting, done, idle
 }
 
 var batteryNames = []string{"hidden", "discharging", "charging"}
-var agentNames = []string{"idle", "working", "waiting", "done"}
+
+type jsSession struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	State  string `json:"state"` // a row's states, parked, archived
+	Turns  int    `json:"turns"`
+	Merged bool   `json:"merged"`
+}
+
+var agentNames = []string{"idle", "working", "waiting", "done", "parked", "archived"}
 
 func toJS(sys Sys, cpuHist, gpuHist []uint8, m Media, a *Agents, now time.Time) jsData {
 	ints := func(b []uint8) []int {
@@ -290,10 +378,14 @@ func toJS(sys Sys, cpuHist, gpuHist []uint8, m Media, a *Agents, now time.Time) 
 		d.Media.Bands = ints(m.Bands[:])
 	}
 	if a != nil {
-		j := &jsAgents{Rows: []jsAgentRow{}, Running: a.Running, Waiting: a.Waiting, LaterWaiting: a.LaterWaiting,
+		j := &jsAgents{Rows: []jsAgentRow{}, Sessions: []jsSession{}, Totals: a.Totals, Running: a.Running, Waiting: a.Waiting, LaterWaiting: a.LaterWaiting,
 			LaterIdle: a.LaterIdle, OldestWait: ageText(a.OldestWait), NewQuestion: a.NewQuestion}
 		for _, r := range a.Rows {
-			j.Rows = append(j.Rows, jsAgentRow{Name: strings.ToUpper(asciiOnly(r.Name)), State: agentNames[min(int(r.State), len(agentNames)-1)]})
+			j.Rows = append(j.Rows, jsAgentRow{ID: r.ID, Name: strings.ToUpper(asciiOnly(r.Name)), State: agentNames[min(int(r.State), len(agentNames)-1)]})
+		}
+		for _, s := range a.Sessions {
+			j.Sessions = append(j.Sessions, jsSession{ID: s.ID, Name: strings.ToUpper(asciiOnly(s.Name)),
+				State: agentNames[min(int(s.State), len(agentNames)-1)], Turns: s.Turns, Merged: s.Merged})
 		}
 		d.Agents = j
 	}

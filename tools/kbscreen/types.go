@@ -20,6 +20,8 @@ const (
 	agentWorking
 	agentWaiting
 	agentDone
+	agentParked   // stopped but not archived
+	agentArchived // archived in the last day
 )
 
 const (
@@ -51,6 +53,21 @@ type Media struct {
 type AgentRow struct {
 	Name  string
 	State uint8
+	ID    string
+}
+
+// Session is one session as the game sees it: live, parked, or archived in
+// the last day.
+type Session struct {
+	ID, Name string
+	State    uint8
+	Turns    int
+	Merged   bool
+}
+
+// Totals count every session Agentique lists, archived ones included.
+type Totals struct {
+	Sessions, Turns, Archived, Merged, Models int
 }
 
 type Agents struct {
@@ -60,6 +77,8 @@ type Agents struct {
 	LaterIdle        int        // idle or finished sessions older than an hour
 	OldestWait       time.Duration
 	NewQuestion      bool // a session started waiting in the last 10 minutes
+	Sessions         []Session
+	Totals           Totals
 }
 
 // ageText is a short age: 5M, 3H, 2D.

@@ -53,20 +53,23 @@ func TestAgentsNowAndLater(t *testing.T) {
 	now := time.Date(2026, 11, 6, 13, 0, 0, 0, time.UTC)
 	unseen := &needsYou{UnseenCompletedAt: "2026-11-06T09:00:00Z"}
 	sessions := []readSession{
-		{ProjectID: "p1", State: "idle", UpdatedAt: "2026-11-06T12:10:00Z"},
-		{ProjectID: "p2", State: "running", UpdatedAt: "2026-11-06T12:58:00.5Z"},
-		// stopped and done stay out, even with an unseen turn
-		{ProjectID: "p3", State: "stopped", NeedsYou: unseen, UpdatedAt: "2026-11-06T12:59:00Z"},
-		{ProjectID: "p3", State: "done", UpdatedAt: "2026-11-06T12:59:00Z"},
+		{ID: "s1", ProjectID: "p1", State: "idle", UpdatedAt: "2026-11-06T12:10:00Z", TurnCount: 4, Model: "opus"},
+		{ID: "s2", ProjectID: "p2", State: "running", UpdatedAt: "2026-11-06T12:58:00.5Z", TurnCount: 1, Model: "fable"},
+		// stopped (parked) and done stay off the rows, even with an unseen turn
+		{ID: "s3", ProjectID: "p3", State: "stopped", NeedsYou: unseen, UpdatedAt: "2026-11-06T12:59:00Z"},
+		{ID: "s4", ProjectID: "p3", State: "done", UpdatedAt: "2026-11-06T12:59:00Z"},
 		// a question from days ago only counts; a new one gets a row and the flag
-		{ProjectID: "p4", State: "idle", NeedsYou: &needsYou{Question: true, WaitingSince: "2026-11-03T13:00:00Z"}, UpdatedAt: "2026-11-03T13:00:00Z"},
-		{ProjectID: "p6", State: "idle", NeedsYou: &needsYou{SurfacesWaiting: 1, WaitingSince: "2026-11-06T12:55:00Z"}, UpdatedAt: "2026-11-06T12:55:00Z"},
-		{ProjectID: "p5", State: "idle", NeedsYou: unseen, UpdatedAt: "2026-11-06T12:30:00Z"},
-		{ProjectID: "p1", State: "idle", UpdatedAt: "2026-11-05T10:00:00Z"},
+		{ID: "s5", ProjectID: "p4", State: "idle", NeedsYou: &needsYou{Question: true, WaitingSince: "2026-11-03T13:00:00Z"}, UpdatedAt: "2026-11-03T13:00:00Z"},
+		{ID: "s6", ProjectID: "p6", State: "idle", NeedsYou: &needsYou{SurfacesWaiting: 1, WaitingSince: "2026-11-06T12:55:00Z"}, UpdatedAt: "2026-11-06T12:55:00Z"},
+		{ID: "s7", ProjectID: "p5", State: "idle", NeedsYou: unseen, UpdatedAt: "2026-11-06T12:30:00Z"},
+		{ID: "s8", ProjectID: "p1", State: "idle", UpdatedAt: "2026-11-05T10:00:00Z"},
+		// archived: today's is still a session for the game, older ones only count
+		{ID: "a1", ProjectID: "p1", State: "stopped", ArchivedAt: "2026-11-06T11:00:00Z", TurnCount: 7, Merged: true, Model: "opus"},
+		{ID: "a2", ProjectID: "p2", State: "done", ArchivedAt: "2026-11-01T11:00:00Z", TurnCount: 3},
 	}
 	names := map[string]string{"p1": "QMK Userspace", "p2": "The Pint", "p3": "Agentique", "p4": "seisiun", "p5": "terminal-drift", "p6": "hittat"}
 	a := summarize(sessions, names, now)
-	want := []AgentRow{{"PINT", agentWorking}, {"HITTA", agentWaiting}, {"TERMI", agentDone}, {"QMK", agentIdle}}
+	want := []AgentRow{{"PINT", agentWorking, "s2"}, {"HITTA", agentWaiting, "s6"}, {"TERMI", agentDone, "s7"}, {"QMK", agentIdle, "s1"}}
 	if len(a.Rows) != len(want) || a.Running != 1 || a.Waiting != 2 || a.LaterWaiting != 1 || a.LaterIdle != 1 ||
 		a.OldestWait != 72*time.Hour || !a.NewQuestion {
 		t.Fatalf("summarize = %+v", a)
@@ -75,6 +78,16 @@ func TestAgentsNowAndLater(t *testing.T) {
 		if a.Rows[i] != want[i] {
 			t.Fatalf("row %d = %+v, want %+v", i, a.Rows[i], want[i])
 		}
+	}
+	states := map[string]uint8{}
+	for _, s := range a.Sessions {
+		states[s.ID] = s.State
+	}
+	if len(states) != 8 || states["s3"] != agentParked || states["a1"] != agentArchived || states["s5"] != agentWaiting {
+		t.Fatalf("sessions = %+v", a.Sessions)
+	}
+	if a.Totals != (Totals{Sessions: 10, Turns: 15, Archived: 2, Merged: 1, Models: 2}) {
+		t.Fatalf("totals = %+v", a.Totals)
 	}
 
 	if ageText(5*time.Minute) != "5M" || ageText(3*time.Hour) != "3H" || ageText(72*time.Hour) != "3D" {
@@ -167,7 +180,7 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 		t.Fatal("no client from config")
 	}
 	a, err := c.agents(context.Background())
-	if err != nil || len(a.Rows) != 1 || a.Rows[0] != (AgentRow{"QMK", agentWorking}) {
+	if err != nil || len(a.Rows) != 1 || a.Rows[0] != (AgentRow{"QMK", agentWorking, ""}) {
 		t.Fatalf("agents = %+v, %v", a, err)
 	}
 	if _, err := newRemoteAgentiqueClient("host:19201", "x"); err == nil {

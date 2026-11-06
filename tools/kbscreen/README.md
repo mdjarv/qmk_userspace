@@ -26,6 +26,7 @@ Files load in this order, into one global scope:
   })());
   ```
 - `main.js`: `render(d, t)` (picks the page, sets `display`, draws the volume readout over any page, returns `f.buf`) and `knob(kind)`, called with `"press"`, `"double"` (twice within 250 ms) or `"long"` (held 500 ms). A single press arrives 250 ms late, once the keyboard knows it was not a double. `context(d)` there decides which page comes up by itself.
+- `save`: an object the pages keep game state in (counters, crops). kbscreen hands it to every fresh runtime on reload and writes it to `~/.local/state/kbscreen/save.json` (`-save`) every 10 s and on exit; a file that is not JSON is moved to `save.json.bad`. Keep it plain JSON and small.
 - `display`: set `display.brightness` (0..255, the left OLED) and `display.keepAwake` (both OLEDs stay on past the 60 s idle blanking while true); kbscreen sends them on.
 
 `t` is milliseconds since kbscreen started. Globals survive between frames, not across reloads.
@@ -37,7 +38,7 @@ Files load in this order, into one global scope:
 | `d.sys` | `cpu`, `gpu` (percent), `cpuHistory`, `gpuHistory` (last 32 s, oldest first), `ramUsed`, `ramTotal`, `vramUsed`, `vramTotal` (GiB; VRAM includes GTT spill), `battery` (percent), `batteryState` (`charging`, `discharging`, `hidden`), `clock` (`14:53`) |
 | `d.media` | `playing`, `title`, `artist` (ASCII), `position`, `length` (s), `volume` (percent, -1 unknown), `muted`, `volumeChangedAgo` (ms, -1 never), `art` (128 bytes, 32x32 in OLED layout), `bands` (10 spectrum bands 0..255) |
 | `d.keyboard` | `null` until the keyboard reports; else `layer` (`base`, `game`, `lower`, `raise`), `ctrl`, `shift`, `alt`, `gui` |
-| `d.agents` | `null` without Agentique; else `rows` (`{name, state}`, state `working`, `waiting`, `done`, `idle`; sessions updated in the last hour, newest first), `running`, `waiting`, `laterWaiting`, `laterIdle`, `oldestWait` (`3D`), `newQuestion` (a question in the last 10 minutes) |
+| `d.agents` | `null` without Agentique; else `rows` (`{id, name, state}`, state `working`, `waiting`, `done`, `idle`; sessions updated in the last hour, newest first), `running`, `waiting`, `laterWaiting`, `laterIdle`, `oldestWait` (`3D`), `newQuestion` (a question in the last 10 minutes), `sessions` (`{id, name, state, turns, merged}` for every live and parked session and those archived in the last day; state is a row's or `parked`, `archived`), `totals` (`sessions`, `turns`, `archived`, `merged`, `models` over everything Agentique lists) |
 
 `make screen` runs kbscreen in the foreground with the same scripts and preview (stop the service first); `DRY=1` also leaves the keyboard alone and logs the data once a second.
 

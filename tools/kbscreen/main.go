@@ -4,6 +4,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"flag"
 	"fmt"
@@ -59,6 +60,8 @@ func main() {
 	scripts := flag.String("scripts", "", "directory with lib.js, pages/*.js and main.js, reloaded on save (default: the built-in ones)")
 	preview := flag.String("preview", "", "serve a live preview of the screen on this address, e.g. localhost:8077")
 	dry := flag.Bool("dry", false, "do not look for the keyboard; log the data once a second")
+	stateDir := cmp.Or(os.Getenv("XDG_STATE_HOME"), filepath.Join(home, ".local/state"))
+	save := flag.String("save", filepath.Join(stateDir, "kbscreen/save.json"), "where the scripts' save object is kept (\"\" keeps it in memory)")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -68,6 +71,11 @@ func main() {
 	rend, err := newRenderer(*scripts)
 	if err != nil {
 		log.Fatalf("scripts: %v", err)
+	}
+	if *save != "" {
+		if err := rend.persist(*save); err != nil {
+			log.Printf("save: %v", err)
+		}
 	}
 	var pv *previewServer
 	if *preview != "" {
@@ -115,6 +123,9 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 	for {
 		select {
 		case <-ctx.Done():
+			if err := rend.saveState(time.Now(), true); err != nil {
+				log.Printf("save: %v", err)
+			}
 			return
 		case b := <-spectrum:
 			st.update(func(st *state) { st.media.Bands, st.media.BandsAt = b, time.Now() })
@@ -155,6 +166,9 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 			continue
 		}
 		pv.setFrame(frame)
+		if err := rend.saveState(now, false); err != nil {
+			say("save: %v", err)
+		}
 
 		if !useDevice {
 			continue

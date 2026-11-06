@@ -59,7 +59,7 @@ func TestBuiltInScreensRender(t *testing.T) {
 	if d := testData(true, nil); d.Media.Title != "Bjork - Joga" || d.Sys.Clock != "14:53" {
 		t.Fatalf("data: %q %q", d.Media.Title, d.Sys.Clock)
 	}
-	agents := &Agents{Rows: []AgentRow{{"QMK", agentWorking}, {"SEISI", agentWaiting}}, Running: 1, Waiting: 2,
+	agents := &Agents{Rows: []AgentRow{{"QMK", agentWorking, "a"}, {"SEISI", agentWaiting, "b"}}, Running: 1, Waiting: 2,
 		LaterWaiting: 1, OldestWait: 72 * time.Hour, NewQuestion: true}
 	seen := map[string][]byte{}
 	for _, c := range []struct {
@@ -230,4 +230,56 @@ func TestNewPageFileIsLoaded(t *testing.T) {
 	if f, err := r.frame(d, 0); err != nil || bytes.Count(f, []byte{0xFF}) != frameSize {
 		t.Fatalf("the zoo page did not show: %v", err)
 	}
+}
+
+// The scripts' save object survives a reload and a restart; a save file that
+// is not JSON is moved aside and the game starts over.
+func TestSaveSurvivesReloadAndRestart(t *testing.T) {
+	dir := copyScripts(t)
+	count := "function render(d, t) { save.n = (save.n || 0) + 1; return f.buf; }\n"
+	touch(t, filepath.Join(dir, "main.js"), count, time.Now().Add(-time.Hour))
+	path := filepath.Join(t.TempDir(), "state", "save.json")
+	saved := func(r *renderer, want string) {
+		t.Helper()
+		if err := r.saveState(time.Now(), true); err != nil {
+			t.Fatal(err)
+		}
+		if b, _ := os.ReadFile(path); string(b) != want {
+			t.Fatalf("save file = %q, want %q", b, want)
+		}
+	}
+	d := testData(false, nil)
+
+	r, err := newRenderer(dir)
+	if err != nil || r.persist(path) != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		r.frame(d, 0)
+	}
+	saved(r, `{"n":3}`)
+	touch(t, filepath.Join(dir, "main.js"), count+"// edited\n", time.Now())
+	if err := r.load(); err != nil {
+		t.Fatal(err)
+	}
+	r.frame(d, 0)
+	saved(r, `{"n":4}`)
+
+	r, _ = newRenderer(dir)
+	if err := r.persist(path); err != nil {
+		t.Fatal(err)
+	}
+	r.frame(d, 0)
+	saved(r, `{"n":5}`)
+
+	write(t, path, []byte("{not json"))
+	r, _ = newRenderer(dir)
+	if err := r.persist(path); err == nil {
+		t.Fatal("a broken save file must be reported")
+	}
+	if _, err := os.Stat(path + ".bad"); err != nil {
+		t.Fatal("the broken save file was not kept aside")
+	}
+	r.frame(d, 0)
+	saved(r, `{"n":1}`)
 }

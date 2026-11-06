@@ -29,11 +29,16 @@ type agentiqueClient struct {
 }
 
 type readSession struct {
-	ProjectID string `json:"projectId"`
-	Name      string `json:"name"`
-	State     string `json:"state"`
-	UpdatedAt string `json:"updatedAt"`
-	NeedsYou  *struct {
+	ID         string `json:"id"`
+	ProjectID  string `json:"projectId"`
+	TurnCount  int    `json:"turnCount"`
+	Merged     bool   `json:"merged"`
+	Model      string `json:"model"`
+	ArchivedAt string `json:"archivedAt"`
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	UpdatedAt  string `json:"updatedAt"`
+	NeedsYou   *struct {
 		UnseenCompletedAt string `json:"unseenCompletedAt"`
 		ApprovalTool      string `json:"approvalTool"`
 		Question          bool   `json:"question"`
@@ -160,13 +165,15 @@ func (c *agentiqueClient) loadProjects(ctx context.Context) {
 
 const (
 	recentFor      = time.Hour        // updated within this, a session gets its own row
+	archivedFor    = 24 * time.Hour   // archived within this, a session is still in Sessions
 	newQuestionFor = 10 * time.Minute // a question this fresh marks the other screens
 )
 
 // summarize splits live sessions into rows for those updated in the last
 // hour, newest first, and counts for the rest. Stopped, failed and done
 // (finished for good) sessions are left out, even with a turn nobody looked
-// at: Agentique keeps hundreds of those.
+// at: Agentique keeps hundreds of those. Sessions has every live and parked
+// session and those archived in the last day, for the game; Totals count all.
 func summarize(sessions []readSession, names map[string]string, now time.Time) Agents {
 	var a Agents
 	type ranked struct {
@@ -174,10 +181,34 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 		updated time.Time
 	}
 	var rows []ranked
+	models := map[string]bool{}
 	for _, s := range sessions {
+		label := names[s.ProjectID]
+		if label == "" {
+			label = s.Name
+		}
+		short := shortName(label)
+		a.Totals.Sessions++
+		a.Totals.Turns += s.TurnCount
+		if s.Merged {
+			a.Totals.Merged++
+		}
+		if s.Model != "" {
+			models[s.Model] = true
+		}
+		if s.ArchivedAt != "" {
+			a.Totals.Archived++
+			if at, err := time.Parse(time.RFC3339Nano, s.ArchivedAt); err == nil && now.Sub(at) < archivedFor {
+				a.Sessions = append(a.Sessions, Session{s.ID, short, agentArchived, s.TurnCount, s.Merged})
+			}
+			continue
+		}
 		var st uint8
 		ny := s.NeedsYou
 		switch {
+		case s.State == "stopped":
+			a.Sessions = append(a.Sessions, Session{s.ID, short, agentParked, s.TurnCount, s.Merged})
+			continue
 		case s.State != "idle" && s.State != "running" && s.State != "merging":
 			continue
 		case ny != nil && (ny.ApprovalTool != "" || ny.Question || ny.SurfacesWaiting > 0 || ny.WaitingSince != ""):
@@ -191,6 +222,7 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 		default:
 			st = agentIdle
 		}
+		a.Sessions = append(a.Sessions, Session{s.ID, short, st, s.TurnCount, s.Merged})
 		updated, _ := time.Parse(time.RFC3339Nano, s.UpdatedAt)
 		if st == agentWaiting {
 			since := updated
@@ -210,12 +242,9 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 			}
 			continue
 		}
-		label := names[s.ProjectID]
-		if label == "" {
-			label = s.Name
-		}
-		rows = append(rows, ranked{AgentRow{shortName(label), st}, updated})
+		rows = append(rows, ranked{AgentRow{short, st, s.ID}, updated})
 	}
+	a.Totals.Models = len(models)
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].updated.After(rows[j].updated) })
 	for _, r := range rows {
 		a.Rows = append(a.Rows, r.row)

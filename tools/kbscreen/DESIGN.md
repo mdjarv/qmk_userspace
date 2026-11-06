@@ -29,6 +29,17 @@ Each came from a round of mockups or from using it on the keyboard (2026-11-06).
 - **The screen never switches itself to demand attention.** Music playing selects the music screen (that is context, not an alert); the agent board is only reached by knob.
 - **Right screen:** text bands for layer and mods were rejected, and having no indicators was missed on the keyboard; the original icon set under half the animation was the answer.
 
+## The agent zoo (farm)
+
+From four rounds on 2026-11-06; the farm is the page that comes up by itself.
+
+- **Where a creature stands says what it is doing** (picked over per-session lanes and one big pet): beds in the middle for work, the fence at the bottom for questions, the farmhouse for sleep. At 0.17 mm a pixel, place reads before faces do.
+- **Farm over construction**: growing then ripe maps onto working then done; an unseen finished turn is a ripe crop waiting to be harvested, and harvests are the progress the events will hang on.
+- **Cast**: 8x8, front-on, faces cut out as holes, feet as separate pixels, a 2-frame idle at 2 fps (the reference sheet in `~/Downloads/g0jpddudups91.mp4`). One creature per project.
+- **No speech bubbles**: a bare `?` over the head; bubbles were noise at this spacing.
+- **Nothing below the fence**: names and counts under it confused. Old questions are a mailbox with its flag up.
+- **Archived, a creature dies**: it keels over and its ghost rises and thins out.
+
 ## Working method
 
 Design work runs as rounds on one page of mockups, each option shown inside the real two-screen context, with a marked recommendation; answers come back short ("S2, P3", "less aggressive"). Now that the screens are JavaScript, a mockup can be a real page file running against live data: edit, look at http://localhost:8077, screenshot `frame.png` for a round.
