@@ -17,11 +17,11 @@ static uint32_t now(void) {
     return t ? t : 1;
 }
 
-static void record_history(const uint8_t sample[5]) {
+static void record_history(const uint8_t sample[2]) {
     if (host.history_len < HOST_HISTORY) {
         host.history_len++;
     }
-    for (uint8_t m = 0; m < 5; m++) {
+    for (uint8_t m = 0; m < 2; m++) {
         memmove(host.history[m], host.history[m] + 1, HOST_HISTORY - 1);
         host.history[m][HOST_HISTORY - 1] = sample[m];
     }
@@ -60,12 +60,17 @@ void raw_hid_receive(uint8_t *d, uint8_t length) {
     host.last_any = now();
     switch (d[0]) {
         case HOST_SYS:
-            host.cpu   = d[1];
-            host.temp  = d[2];
-            host.ram   = d[3];
-            host.gpu   = d[4];
-            host.power = d[5];
-            record_history((uint8_t[]){host.cpu, host.gpu, host.ram, host.temp, host.power});
+            host.cpu           = d[1];
+            host.gpu           = d[2];
+            host.ram_used      = d[3] | d[4] << 8;
+            host.ram_total     = d[5];
+            host.vram_used     = d[6] | d[7] << 8;
+            host.vram_total    = d[8];
+            host.battery       = d[9];
+            host.battery_state = d[10];
+            host.hour          = d[11];
+            host.minute        = d[12];
+            record_history((uint8_t[]){host.cpu, host.gpu});
             host.last_sys = now();
             break;
         case HOST_MEDIA: {

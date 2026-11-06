@@ -8,9 +8,9 @@ import (
 	"strings"
 )
 
-// sysReader samples CPU, memory, temperature, GPU and power from /proc and
-// /sys under root ("/" outside tests). CPU load needs two samples, so the
-// first read reports zero load.
+// sysReader samples CPU, GPU, memory and battery from /proc and /sys under
+// root ("/" outside tests). CPU load needs two samples, so the first read
+// reports zero load.
 type sysReader struct {
 	root string
 	prev cpuTimes // the last /proc/stat total
@@ -26,16 +26,10 @@ func newSysReader(root string) *sysReader {
 func (r *sysReader) path(p string) string { return filepath.Join(r.root, p) }
 
 func (r *sysReader) read() Sys {
-	var s Sys
-	s.CPU = uint8(r.cpuLoad()*100 + 0.5)
-	s.RAM = r.memPercent()
-	s.Temp = uint8(r.hwmon("k10temp", "temp1_input") / 1000)
-	watts := r.hwmon("amdgpu", "power1_input")
-	if watts == 0 {
-		watts = r.hwmon("amdgpu", "power1_average")
-	}
-	s.Power = uint8(min(watts/1_000_000, 255))
-	s.GPU = r.gpuBusy()
+	s := Sys{CPU: uint8(r.cpuLoad()*100 + 0.5), GPU: r.gpuBusy()}
+	s.RAMUsed, s.RAMTotal = r.memory()
+	s.VRAMUsed, s.VRAMTotal = r.vram()
+	s.Battery, s.BatteryState = r.battery()
 	return s
 }
 
@@ -73,42 +67,65 @@ func (r *sysReader) cpuLoad() float64 {
 	return 0
 }
 
-func (r *sysReader) memPercent() uint8 {
+const gib = 1 << 30
+
+// memory returns used and total system RAM in GiB.
+func (r *sysReader) memory() (used, total float64) {
 	data, err := os.ReadFile(r.path("proc/meminfo"))
 	if err != nil {
-		return 0
+		return 0, 0
 	}
-	var total, avail float64
+	var avail float64
 	for line := range strings.Lines(string(data)) {
 		f := strings.Fields(line)
 		if len(f) < 2 {
 			continue
 		}
-		v, _ := strconv.ParseFloat(f[1], 64)
+		v, _ := strconv.ParseFloat(f[1], 64) // kB
 		switch f[0] {
 		case "MemTotal:":
-			total = v
+			total = v * 1024 / gib
 		case "MemAvailable:":
-			avail = v
+			avail = v * 1024 / gib
 		}
 	}
-	if total == 0 {
-		return 0
-	}
-	return uint8((total-avail)/total*100 + 0.5)
+	return total - avail, total
 }
 
-// hwmon reads a value from the hwmon device with that name, 0 if missing.
-func (r *sysReader) hwmon(name, file string) uint64 {
-	dirs, _ := filepath.Glob(r.path("sys/class/hwmon/hwmon*"))
+// vram returns the GPU's memory use in GiB: its own VRAM plus what spilled
+// into system memory (GTT), against the size of the VRAM.
+func (r *sysReader) vram() (used, total float64) {
+	dirs, _ := filepath.Glob(r.path("sys/class/drm/card*/device"))
 	for _, d := range dirs {
-		n, err := os.ReadFile(filepath.Join(d, "name"))
-		if err != nil || strings.TrimSpace(string(n)) != name {
+		t := readUint(filepath.Join(d, "mem_info_vram_total"))
+		if t == 0 {
 			continue
 		}
-		return readUint(filepath.Join(d, file))
+		u := readUint(filepath.Join(d, "mem_info_vram_used")) + readUint(filepath.Join(d, "mem_info_gtt_used"))
+		return float64(u) / gib, float64(t) / gib
 	}
-	return 0
+	return 0, 0
+}
+
+// battery returns the first battery's charge and whether to show it: only
+// while charging or discharging, not when full or held on AC.
+func (r *sysReader) battery() (pct, state uint8) {
+	dirs, _ := filepath.Glob(r.path("sys/class/power_supply/BAT*"))
+	for _, d := range dirs {
+		status, err := os.ReadFile(filepath.Join(d, "status"))
+		if err != nil {
+			continue
+		}
+		pct = uint8(min(readUint(filepath.Join(d, "capacity")), 100))
+		switch strings.TrimSpace(string(status)) {
+		case "Charging":
+			return pct, batteryCharging
+		case "Discharging":
+			return pct, batteryDischarging
+		}
+		return pct, batteryHidden
+	}
+	return 0, batteryHidden
 }
 
 func (r *sysReader) gpuBusy() uint8 {

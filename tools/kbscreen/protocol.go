@@ -41,11 +41,26 @@ const (
 )
 
 type Sys struct {
-	CPU, Temp, RAM, GPU, Power uint8
+	CPU, GPU          uint8   // percent
+	RAMUsed, RAMTotal float64 // GiB
+	VRAMUsed          float64 // GiB, including what spilled into system memory (GTT)
+	VRAMTotal         float64 // GiB
+	Battery           uint8   // percent
+	BatteryState      uint8   // batteryHidden, batteryDischarging, batteryCharging
+	Hour, Minute      uint8   // local time; the keyboard has no clock of its own
 }
 
+const (
+	batteryHidden = iota // no battery, or on AC and not charging
+	batteryDischarging
+	batteryCharging
+)
+
 func (s Sys) report() report {
-	return report{msgSys, s.CPU, s.Temp, s.RAM, s.GPU, s.Power}
+	tenths := func(gib float64) uint16 { return uint16(min(max(gib*10+0.5, 0), 65535)) }
+	ru, vu := tenths(s.RAMUsed), tenths(s.VRAMUsed)
+	return report{msgSys, s.CPU, s.GPU, byte(ru), byte(ru >> 8), clamp8(int(s.RAMTotal + 0.5)),
+		byte(vu), byte(vu >> 8), clamp8(int(s.VRAMTotal + 0.5)), s.Battery, s.BatteryState, s.Hour, s.Minute}
 }
 
 type Media struct {

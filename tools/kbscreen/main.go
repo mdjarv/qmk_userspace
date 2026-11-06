@@ -174,6 +174,8 @@ func pollSys(ctx context.Context, st *state) {
 	r := newSysReader("/")
 	for ctx.Err() == nil {
 		s := r.read()
+		now := time.Now()
+		s.Hour, s.Minute = uint8(now.Hour()), uint8(now.Minute())
 		st.update(func(st *state) { st.sys = s })
 		sleep(ctx, time.Second)
 	}
@@ -281,7 +283,8 @@ func dryRun(ctx context.Context, st *state, spectrum <-chan [bandCount]uint8) {
 					art++
 				}
 			}
-			log.Printf("cpu %d%% temp %dC ram %d%% gpu %d%% %dW", s.CPU, s.Temp, s.RAM, s.GPU, s.Power)
+			log.Printf("cpu %d%% gpu %d%% ram %.1f/%.0fG vram %.1f/%.0fG battery %d%% state %d time %02d:%02d",
+				s.CPU, s.GPU, s.RAMUsed, s.RAMTotal, s.VRAMUsed, s.VRAMTotal, s.Battery, s.BatteryState, s.Hour, s.Minute)
 			log.Printf("media playing=%v %d/%ds vol %d muted=%v %q / %q art %d px lit, bands %v",
 				m.Playing, m.Position, m.Length, m.Volume, m.Muted, m.Title, m.Artist, art, bands)
 			if has {

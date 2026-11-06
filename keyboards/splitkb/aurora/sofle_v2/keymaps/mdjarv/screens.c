@@ -1,5 +1,6 @@
 // Left OLED screens drawn from host data (hostdata.h):
-//   SYS     line graphs of CPU, GPU, RAM, temperature and power
+//   SYS     battery and clock; CPU and GPU load graphs, each with its memory
+//           (RAM, VRAM) as a tank beside it
 //   MUSIC   album art, scrolling title and artist, spectrum, track position
 //   AGENTS  Agentique sessions, newest update first: working, waiting on you,
 //           finished and unseen, idle
@@ -48,42 +49,95 @@ static void bar(int y, uint8_t pct) {
     fb_fill(0, y + 1, MIN(pct, 100) * FB_W / 100, 1, true);
 }
 
-// A line graph of one metric's history, h rows tall, newest at the right edge,
-// filling in from the right while history is short. lo..hi spans the height.
-static void graph(int y0, int h, enum host_metric m, uint8_t lo, uint8_t hi) {
-    int prev = -1;
-    for (int i = 0; i < host.history_len; i++) {
-        int x = FB_W - host.history_len + i;
-        int v = host.history[m][HOST_HISTORY - host.history_len + i];
-        v     = (MIN(MAX(v, lo), hi) - lo) * (h - 1) / (hi - lo);
+// A line graph of one metric's 0..100 history in a w x h box at x0, y0, newest
+// at the right edge, filling in from the right while history is short.
+static void graph(int x0, int y0, int w, int h, enum host_metric m) {
+    int n = MIN(host.history_len, w), prev = -1;
+    for (int i = 0; i < n; i++) {
+        int v = MIN(host.history[m][HOST_HISTORY - n + i], 100) * (h - 1) / 100;
         int y = y0 + h - 1 - v;
         if (prev < 0) prev = y;
-        for (int k = MIN(prev, y); k <= MAX(prev, y); k++) fb_px(x, k, true);
+        for (int k = MIN(prev, y); k <= MAX(prev, y); k++) fb_px(x0 + w - n + i, k, true);
         prev = y;
     }
 }
 
-// Power has no natural ceiling: scale to the history's peak, at least 20 W.
-static uint8_t power_peak(void) {
-    uint8_t peak = 20;
-    for (int i = HOST_HISTORY - host.history_len; i < HOST_HISTORY; i++) peak = MAX(peak, host.history[METRIC_POWER][i]);
-    return peak;
+// A solid vertical level, outlined.
+static void tank(int x, int y, int w, int h, uint16_t used, uint16_t total) {
+    fb_rect(x, y, w, h);
+    int fill = total ? (int)MIN(used, total) * (h - 2) / total : 0;
+    fb_fill(x + 1, y + h - 1 - fill, w - 2, fill, true);
+}
+
+// Icons as rows of bits, leftmost pixel in bit (width - 1).
+static void icon(const uint8_t *rows, int n, int width, int x, int y) {
+    for (int r = 0; r < n; r++) {
+        for (int c = 0; c < width; c++) {
+            if (rows[r] & (1 << (width - 1 - c))) fb_px(x + c, y + r, true);
+        }
+    }
+}
+static const uint8_t icon_cpu[]  = {0x14, 0x3E, 0x63, 0x2A, 0x63, 0x3E, 0x14};
+static const uint8_t icon_gpu[]  = {0x7F, 0x5D, 0x55, 0x5D, 0x7F, 0x2A};
+static const uint8_t icon_ram[]  = {0x7F, 0x55, 0x7F, 0x2A};
+static const uint8_t icon_plug[] = {0x0A, 0x0A, 0x1F, 0x1F, 0x0E, 0x04};
+
+static void format_gib(char *buf, size_t len, uint16_t tenths) {
+    if (tenths < 100) {
+        snprintf(buf, len, "%u.%uG", tenths / 10, tenths % 10);
+    } else {
+        snprintf(buf, len, "%uG", (tenths + 5) / 10);
+    }
+}
+
+static void robot(int x, int y, uint8_t state, uint8_t i);
+static bool question_is_new(void);
+
+// Battery (only while charging or discharging) with its % on one line, the
+// asking robot in place of the % while a question is new, then the clock.
+static void render_status(void) {
+    char buf[8];
+    bool ask = question_is_new();
+    if (host.battery_state != BATTERY_HIDDEN) {
+        fb_rect(0, 0, 15, 8);
+        fb_fill(15, 2, 2, 4, true);
+        fb_fill(2, 2, (host.battery * 11 + 50) / 100, 4, true);
+        if (host.battery_state == BATTERY_CHARGING) {
+            fb_fill(4, 1, 7, 6, false);
+            icon(icon_plug, 6, 5, 5, 1);
+        }
+        if (!ask) {
+            snprintf(buf, sizeof(buf), "%u%%", host.battery);
+            fb_tiny(buf, 19, 2, true);
+        }
+    }
+    if (ask) robot(19, 0, AGENT_WAITING, 0);
+    snprintf(buf, sizeof(buf), "%02u:%02u", host.hour, host.minute);
+    fb_text(buf, 1, 11, 1, true);
+    fb_dotted(21);
+}
+
+// A load graph with its memory tank beside it: icon and load % on top, the
+// memory icon and GiB used below.
+static void render_pair(int y, const uint8_t *load_icon, int load_rows, enum host_metric m, uint8_t load,
+                        const char *mem_tag, uint16_t used, uint8_t total) {
+    char buf[8];
+    icon(load_icon, load_rows, 7, 0, y);
+    snprintf(buf, sizeof(buf), "%u%%", load);
+    fb_tiny(buf, 9, y + 1, true);
+    graph(0, y + 9, 23, 28, m);
+    tank(25, y + 9, 7, 28, used, total * 10);
+    icon(icon_ram, 4, 7, 0, y + 39);
+    if (mem_tag) fb_tiny(mem_tag, 8, y + 38, true);
+    format_gib(buf, sizeof(buf), used);
+    fb_tiny(buf, FB_W + 1 - fb_tiny_width(buf), y + 38, true);
 }
 
 static void render_sys(void) {
-    static const char *const labels[] = {"CPU", "GPU", "RAM", "TMP", "PWR"};
-    static const char *const units[]  = {"%", "%", "%", "*", "W"};
-    const uint8_t            now[]    = {host.cpu, host.gpu, host.ram, host.temp, host.power};
-    const uint8_t            lo[]     = {0, 0, 0, 30, 0};
-    const uint8_t            hi[]     = {100, 100, 100, 100, power_peak()};
-    char                     buf[8];
-    for (int m = 0; m < 5; m++) {
-        int y = m * 26;
-        fb_tiny(labels[m], 0, y, true);
-        snprintf(buf, sizeof(buf), "%u%s", now[m], units[m]);
-        fb_tiny(buf, FB_W + 1 - fb_tiny_width(buf), y, true);
-        graph(y + 7, 16, m, lo[m], hi[m]);
-    }
+    render_status();
+    render_pair(25, icon_cpu, 7, METRIC_CPU, host.cpu, NULL, host.ram_used, host.ram_total);
+    fb_dotted(73);
+    render_pair(78, icon_gpu, 6, METRIC_GPU, host.gpu, "V", host.vram_used, host.vram_total);
 }
 
 // Scrolls text that does not fit; text that fits stands still.
@@ -199,9 +253,14 @@ static void render_agents(void) {
     }
 }
 
-// The asking robot in the top right corner while a question is new.
+static bool question_is_new(void) {
+    return host_fresh(host.last_agents, AGENTS_TIMEOUT) && host.new_question;
+}
+
+// The asking robot in the top right corner of the music screen while a
+// question is new; perf has a place for it in its status line.
 static void render_question_mark(void) {
-    if (!host_fresh(host.last_agents, AGENTS_TIMEOUT) || !host.new_question) return;
+    if (!question_is_new()) return;
     fb_fill(19, 0, 13, 10, false);
     robot(20, 0, AGENT_WAITING, 0);
 }
@@ -249,7 +308,7 @@ void screens_render(void) {
             default:
                 render_sys();
         }
-        if (shown != SCREEN_AGENTS) render_question_mark();
+        if (shown == SCREEN_MUSIC) render_question_mark();
         if (host.volume != 255 && host_fresh(host.volume_changed, VOLUME_SHOW)) render_volume();
     }
     fb_flush();

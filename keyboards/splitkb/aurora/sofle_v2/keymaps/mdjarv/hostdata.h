@@ -7,7 +7,10 @@
 #include <stdint.h>
 
 enum host_msg {
-    // [1] cpu %  [2] temp C  [3] ram %  [4] gpu %  [5] power W, once a second
+    // Once a second: [1] cpu %  [2] gpu %  [3..4] RAM used, tenths of GiB
+    // [5] RAM GiB  [6..7] VRAM used (with GTT spill), tenths of GiB
+    // [8] VRAM GiB  [9] battery %  [10] battery state (host_battery)
+    // [11] hour  [12] minute (local time)
     HOST_SYS = 0x01,
     // [1] flags (bit 0 playing)  [2..3] position s  [4..5] length s
     // [6] volume % (255 unknown)  [7] muted
@@ -29,7 +32,9 @@ enum host_msg {
     HOST_AGENTS = 0x06,
 };
 
-enum host_metric { METRIC_CPU, METRIC_GPU, METRIC_RAM, METRIC_TEMP, METRIC_POWER };
+enum host_metric { METRIC_CPU, METRIC_GPU };
+
+enum host_battery { BATTERY_HIDDEN, BATTERY_DISCHARGING, BATTERY_CHARGING };
 
 enum agent_state { AGENT_IDLE, AGENT_WORKING, AGENT_WAITING, AGENT_DONE };
 
@@ -49,9 +54,13 @@ typedef struct {
     uint32_t last_sys, last_media, last_spectrum, last_agents;
 
     // Newest SYS sample, and the last HOST_HISTORY of each, oldest first.
-    uint8_t cpu, temp, ram, gpu, power;
-    uint8_t history[5][HOST_HISTORY]; // indexed by host_metric
-    uint8_t history_len;
+    uint8_t  cpu, gpu;                 // percent
+    uint16_t ram_used, vram_used;      // tenths of GiB
+    uint8_t  ram_total, vram_total;    // GiB
+    uint8_t  battery, battery_state;   // percent, host_battery
+    uint8_t  hour, minute;
+    uint8_t  history[2][HOST_HISTORY]; // CPU and GPU load, indexed by host_metric
+    uint8_t  history_len;
 
     bool     playing, muted;
     uint16_t position, length;

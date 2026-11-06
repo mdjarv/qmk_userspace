@@ -228,3 +228,31 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 		t.Fatal("a URL without a scheme must be refused")
 	}
 }
+
+// VRAM counts what spilled into GTT; the battery only shows while it charges
+// or discharges; GiB go to the keyboard in tenths.
+func TestSysMemoryBatteryReport(t *testing.T) {
+	root := t.TempDir()
+	write(t, root+"/proc/meminfo", []byte("MemTotal:       32505856 kB\nMemAvailable:   13238272 kB\n"))
+	dev := root + "/sys/class/drm/card1/device/"
+	write(t, dev+"mem_info_vram_total", []byte("34359738368\n"))
+	write(t, dev+"mem_info_vram_used", []byte("21474836480\n"))
+	write(t, dev+"mem_info_gtt_used", []byte("2147483648\n"))
+	write(t, root+"/sys/class/power_supply/BAT0/capacity", []byte("76\n"))
+	write(t, root+"/sys/class/power_supply/BAT0/status", []byte("Charging\n"))
+
+	s := newSysReader(root).read()
+	s.Hour, s.Minute = 14, 53
+	r := s.report()
+	ram := int(r[3]) | int(r[4])<<8
+	vram := int(r[6]) | int(r[7])<<8
+	if ram != 184 || r[5] != 31 || vram != 220 || r[8] != 32 || r[9] != 76 || r[10] != batteryCharging || r[11] != 14 || r[12] != 53 {
+		t.Fatalf("report % x (ram %d vram %d)", r[:13], ram, vram)
+	}
+	for status, want := range map[string]uint8{"Discharging": batteryDischarging, "Full": batteryHidden, "Not charging": batteryHidden} {
+		write(t, root+"/sys/class/power_supply/BAT0/status", []byte(status+"\n"))
+		if _, st := newSysReader(root).battery(); st != want {
+			t.Fatalf("%s: state %d, want %d", status, st, want)
+		}
+	}
+}
