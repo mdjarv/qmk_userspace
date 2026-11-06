@@ -1,6 +1,6 @@
 # kbscreen
 
-Draws the Sofle's left OLED and sends it over Raw HID. The keyboard only shows the frames (and the cat when kbscreen is silent for 3 s); everything on that screen is JavaScript in `js/`, reloaded when you save.
+Draws the Sofle's left OLED and sends it over Raw HID. The keyboard only shows the frames (and the cat when kbscreen is silent for 3 s); everything on that screen is JavaScript in `js/`, reloaded when you save. `DESIGN.md` has the design verdicts the current screens follow.
 
 | Data | Source |
 |---|---|
@@ -26,6 +26,17 @@ The service runs the repo's `js/` (`make screen-install` points it there) and se
 | `d.agents` | `null` without Agentique; else `rows` (`{name, state}`, state `working`, `waiting`, `done`, `idle`; sessions updated in the last hour, newest first), `running`, `waiting`, `laterWaiting`, `laterIdle`, `oldestWait` (`3D`), `newQuestion` (a question in the last 10 minutes) |
 
 `make screen` runs kbscreen in the foreground with the same scripts and preview (stop the service first); `DRY=1` also leaves the keyboard alone and logs the data once a second.
+
+## Files
+
+| File | Holds |
+|---|---|
+| `js/lib.js`, `js/screens.js` | The screens (also built into the binary, used without `-scripts`) |
+| `render.go` | goja runtime, reload, the `d` object (`jsData`) |
+| `frame.go`, `device.go` | Frame chunks, commands and keyboard events over hidraw |
+| `sys.go`, `media.go`, `art.go`, `spectrum.go`, `agents.go` | The data sources |
+| `types.go`, `main.go`, `preview.go` | State, the render loop, the browser preview |
+| `font.go` | The keyboard's OLED font, generated from qmk_firmware's `glcdfont.c` |
 
 ## Setup
 

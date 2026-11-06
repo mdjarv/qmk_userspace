@@ -15,7 +15,7 @@ Behaviour worth knowing:
 
 - **Game mode** (default layer 1) toggles after holding the outer right thumb key for 0.5 s, so a brushing palm does not switch it. The right OLED shows the amazed face instead of the headphones while it is on.
 - **Esc / Right Shift** is one mod-tap key. Permissive hold makes pressing and releasing another key while it is down count as Shift.
-- **Knobs**: left is volume, right is scroll; both do nothing on Lower. Pressing the right knob shows the next left-OLED screen.
+- **Knobs**: left is volume, right is scroll; both do nothing on Lower. Pressing the right knob goes to kbscreen (below); a single press lands 250 ms after release, since the keyboard first rules out a double press.
 - **Debounce** is `asym_eager_defer_pk` at 10 ms: presses register at once, releases wait 10 ms of stable contact, which swallows switch chatter.
 - **Left OLED** is drawn by `tools/kbscreen` on the computer (perf, music, agents; the screens are JavaScript in `tools/kbscreen/js`, editable live). The keyboard shows its frames, or the cat when it sends nothing for 3 s. Right knob presses go to kbscreen: once for the next screen, twice for the previous one, held to go back to the automatic choice. kbscreen also sets the left OLED's brightness (dimmer at night) and keeps both screens on while music plays.
 - **Right OLED** is the top half of the headphones animation (the amazed face in game mode) over the layer icon and the Gui/Alt/Ctrl/Shift tiles.

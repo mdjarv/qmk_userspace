@@ -6,13 +6,25 @@ External QMK userspace for one keyboard: splitkb Aurora Sofle v2 with Liatris (R
 
 - `keyboards/splitkb/aurora/sofle_v2/keymaps/mdjarv/`: the keymap; its README lists what each file holds.
   - `keymap.json`: layers, encoders, converter and all data-driven settings. Layers are numbered; `layers.h` names them for C and must stay in the same order.
-  - `keymap.c`: behaviour only (hold-to-toggle game mode, `SCREEN_NEXT`, Liatris LED off). The build includes it into the code generated from keymap.json.
+  - `keymap.c`: behaviour only (hold-to-toggle game mode, the right knob's `SCREEN_NEXT`, Liatris LED off). The build includes it into the code generated from keymap.json.
   - `oled.c`, `gfx/`: OLED entry point and animations. A blanked OLED must not draw: drawing turns it back on and fights the split OLED sync.
-  - `screens.c`, `hostdata.[ch]`: the left (USB) OLED only shows frames from `tools/kbscreen` (the cat when it is silent) and sends knob presses back. `hostdata.h` is the frame protocol; `tools/kbscreen/frame.go` must match it. Don't name a keymap header after a QMK one (`host.h` shadowed QMK's and broke `sofle_v2.c`).
+  - `screens.c`, `hostdata.[ch]`: the left (USB) OLED only shows frames from `tools/kbscreen` (the cat when it is silent for 3 s). It sends back the right knob's single/double/long presses and layer + mods, and takes brightness and keep-awake commands. `hostdata.h` is that protocol; `tools/kbscreen/frame.go` must match it. Don't name a keymap header after a QMK one (`host.h` shadowed QMK's and broke `sofle_v2.c`).
   - `config.h`, `rules.mk`: only what keymap.json cannot express.
 - `tools/kbflash/`: Go (Bubble Tea) tool behind `make flash|backup|restore|drill`. Halves are recognised by RP2040 flash ID from `kbflash.json`; picotool `--ser` matches the flash ID, not the USB serial. Tests: `got --report .` in that directory (a fake picotool and fake sysfs drive the real flow).
-- `tools/kbscreen/`: Go daemon that draws the left OLED: data from /proc, amdgpu sysfs, battery, clock, playerctl + wpctl/pactl, parec spectrum, Agentique's read API (`url` and read `token` in `~/.config/kbscreen/config.toml`); the screens are JavaScript in `js/` run by goja, reloaded on save, previewed at http://localhost:8077. Change the screens there, not in the firmware. `make screen-install` installs the systemd user unit; the udev rule `70-kbscreen.rules` must be installed by hand with sudo. Tests: `got --report .` in that directory.
+- `tools/kbscreen/`: Go daemon that draws the left OLED (systemd user unit `kbscreen`). It gathers the data (/proc, amdgpu sysfs, battery, clock, playerctl + wpctl/pactl, parec spectrum, Agentique's read API with `url` and read `token` in `~/.config/kbscreen/config.toml`) and runs the screens, which are JavaScript in `js/` (goja). Its README is the scripting reference; `DESIGN.md` holds the design verdicts. Tests: `got --report .` in that directory.
 - `archive/vial-2026-10-21.vil`: the Vial layout this keymap came from.
+
+## Left OLED pages
+
+New pages and changes to them never need a flash: they are `tools/kbscreen/js/screens.js` (drawing helpers in `lib.js`).
+
+- Read `tools/kbscreen/DESIGN.md` first, then the README's scripting section (what `render(d, t)`, `knob(kind)`, `display` and every field of `d` are).
+- Loop: edit and save; the running service reloads within a second; look at the keyboard or http://localhost:8077 (`/frame.png` for a screenshot to put in a design round, `/error` for the last script error). A broken save keeps the last good version drawing; `journalctl --user -u kbscreen -f` has the log.
+- A page is a function drawing into the `Frame`; add it to `SCREENS` (knob order) and to `render`'s dispatch, and to `context` if it should come up by itself.
+- Only `lib.js` and `screens.js` are loaded (`scriptFiles` in `render.go`). Splitting pages into more files means extending that list.
+- New data needs Go: a source (like `sys.go`), a field in `Sys`/`Media` (`types.go`), its mapping into `jsData`/`toJS` (`render.go`), a line in the README's table, and a test of the source against fake files. Rebuild with `make screen-install`.
+- The Go tests check the contract (frames, reload, runaway scripts, every built-in screen draws), not pixels, so restyling a screen does not break them. Run them after changing `screens.js` anyway: they catch a page that throws.
+- Still firmware (needs a flash): anything about the right OLED, the cat fallback and its 3 s timeout, the 60 s idle blanking, the knob timings, frame rates above 20 fps, and new kinds of keyboard input. Keystrokes are not sent to the host on purpose; typing-driven pages should read the keyboard's input device on the computer.
 
 ## Workflow
 
@@ -22,8 +34,8 @@ External QMK userspace for one keyboard: splitkb Aurora Sofle v2 with Liatris (R
 4. If it goes wrong: `make restore BACKUP=~/git/keyboard/backups/<dir>`; the newest QMK-era backup is `20261021-104152`, the Vial-era one `20261021-083326-drill`.
 5. Push to GitHub: Actions builds the firmware and publishes it as the "Latest QMK Firmware" release.
 
-## Open threads (2026-10-21)
+## Open threads
 
-- Double taps: debounce changed to `asym_eager_defer_pk` 10 ms without measuring. If they persist, measure first: log same-key re-presses within 50 ms of release from this keyboard's input device.
-- Volume sometimes jumps to max: not investigated; seen on the old Vial firmware. Same logger idea: count volume-up bursts from this keyboard to tell the encoder from the host.
-- OLED idle blanking (60 s, both halves) not yet confirmed on hardware.
+- Double taps (2026-10-21): debounce changed to `asym_eager_defer_pk` 10 ms without measuring. If they persist, measure first: log same-key re-presses within 50 ms of release from this keyboard's input device.
+- Volume sometimes jumps to max (2026-10-21): not investigated; seen on the old Vial firmware. Same logger idea: count volume-up bursts from this keyboard to tell the encoder from the host. The left OLED now shows the volume for 1.5 s after every change, which may show when it happens.
+- OLED idle blanking (60 s, both halves) not explicitly confirmed on hardware; since 2026-11-06 kbscreen can also hold both screens on (keep-awake while music plays).
