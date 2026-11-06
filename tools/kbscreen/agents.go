@@ -35,6 +35,8 @@ type readSession struct {
 	Merged     bool   `json:"merged"`
 	Model      string `json:"model"`
 	ArchivedAt string `json:"archivedAt"`
+	ParentID   string `json:"parentId"`
+	InFlight   *int   `json:"agentsInFlight"`
 	Name       string `json:"name"`
 	State      string `json:"state"`
 	UpdatedAt  string `json:"updatedAt"`
@@ -188,6 +190,11 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 			label = s.Name
 		}
 		short := shortName(label)
+		helpers := 0
+		if s.InFlight != nil {
+			helpers = *s.InFlight
+		}
+		sess := Session{ID: s.ID, Name: short, Turns: s.TurnCount, Merged: s.Merged, Parent: s.ParentID, Helpers: helpers}
 		a.Totals.Sessions++
 		a.Totals.Turns += s.TurnCount
 		if s.Merged {
@@ -199,7 +206,8 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 		if s.ArchivedAt != "" {
 			a.Totals.Archived++
 			if at, err := time.Parse(time.RFC3339Nano, s.ArchivedAt); err == nil && now.Sub(at) < archivedFor {
-				a.Sessions = append(a.Sessions, Session{s.ID, short, agentArchived, s.TurnCount, s.Merged})
+				sess.State = agentArchived
+				a.Sessions = append(a.Sessions, sess)
 			}
 			continue
 		}
@@ -207,7 +215,8 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 		ny := s.NeedsYou
 		switch {
 		case s.State == "stopped":
-			a.Sessions = append(a.Sessions, Session{s.ID, short, agentParked, s.TurnCount, s.Merged})
+			sess.State = agentParked
+			a.Sessions = append(a.Sessions, sess)
 			continue
 		case s.State != "idle" && s.State != "running" && s.State != "merging":
 			continue
@@ -222,7 +231,8 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 		default:
 			st = agentIdle
 		}
-		a.Sessions = append(a.Sessions, Session{s.ID, short, st, s.TurnCount, s.Merged})
+		sess.State = st
+		a.Sessions = append(a.Sessions, sess)
 		updated, _ := time.Parse(time.RFC3339Nano, s.UpdatedAt)
 		if st == agentWaiting {
 			since := updated
@@ -242,7 +252,7 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 			}
 			continue
 		}
-		rows = append(rows, ranked{AgentRow{short, st, s.ID}, updated})
+		rows = append(rows, ranked{AgentRow{short, st, s.ID, s.ParentID, helpers}, updated})
 	}
 	a.Totals.Models = len(models)
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].updated.After(rows[j].updated) })

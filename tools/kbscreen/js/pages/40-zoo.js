@@ -8,11 +8,16 @@
 // ---- demo fleet: 64 s a loop, typical (24 s), busy (24 s), quiet (16 s) -----
 const SCENES = [
   { len: 24, later: [0, '', 2], rows: [
-    ['q', 'QMK', 'bot', [[0, 'working'], [8, 'waiting'], [16, 'done']]],
+    ['q', 'QMK', 'bot', [[0, 'working'], [8, 'waiting'], [16, 'done']], { helpers: 2 }],
     ['p', 'PINT', 'cat', [[0, 'waiting'], [5, 'working'], [14, 'done'], [20, 'idle']]],
     ['s', 'SEISI', 'bun', [[0, 'working']]],
     ['g', 'AGENT', 'ghost', [[0, 'idle']]],
     ['b', 'CINDE', 'blob', [[0, 'done'], [11, 'idle'], [17, 'archived']]],
+    // a lead that waits on three workers of its own
+    ['t', 'TJANS', 'frog', [[0, 'idle']]],
+    ['t1', 'TJANS', 'frog', [[0, 'working'], [16, 'done']], { parent: 't' }],
+    ['t2', 'TJANS', 'frog', [[0, 'working'], [8, 'waiting'], [13, 'working']], { parent: 't' }],
+    ['t3', 'TJANS', 'frog', [[0, 'working'], [19, 'archived']], { parent: 't' }],
   ] },
   { len: 24, later: [3, '2D', 7], rows: [
     ['q', 'QMK', 'bot', [[0, 'working'], [6, 'waiting'], [14, 'working']]],
@@ -30,10 +35,12 @@ const LOOP = SCENES.reduce((s, c) => s + c.len, 0);
 function demoAgents(t) {
   let s = (t / 1000) % LOOP, scene = SCENES[0];
   for (const c of SCENES) { if (s < c.len) { scene = c; break; } s -= c.len; }
-  const all = scene.rows.map(([id, name, kind, tl]) => {
+  const n0 = SCENES.indexOf(scene);
+  const all = scene.rows.map(([id, name, kind, tl, x]) => {
     let state = tl[0][1], since = tl[0][0];
     tl.forEach(([at, st]) => { if (s >= at) { state = st; since = at; } });
-    return { id: id + SCENES.indexOf(scene), name, kind, state, since };
+    x = x || {};
+    return { id: id + n0, name, kind, state, since, parent: x.parent ? x.parent + n0 : '', helpers: state === 'working' ? x.helpers || 0 : 0 };
   }).sort((a, b) => b.since - a.since);
   const rows = all.filter(r => r.state !== 'archived');
   const n = st => rows.filter(r => r.state === st).length;
@@ -194,7 +201,8 @@ function site(name, scenery, layout, under, opts) {
   let last = null;
   page(name, function (d, t) {
     const dt = last === null ? 50 : Math.min(200, Math.max(0, t - last)); last = t;
-    const a = agentsOf(d, t, opts.demo);
+    let a = agentsOf(d, t, opts.demo);
+    if (a && opts.prepare) a = opts.prepare(a);
     st.d = d; st.dt = dt;
     scenery(a, t, st);
     if (!a) return;
@@ -225,6 +233,7 @@ function site(name, scenery, layout, under, opts) {
       const s = m.r.state;
       if (m.dying) { if (!departing(m, t)) mobs.delete(m.r.id); }
       else if (m.moving) critter(m.kind, 'walk', m.x, m.y, t, m.sd);
+      else if (m.pose) critter(m.kind, m.pose, m.x, m.y, t, m.sd);
       else if (s === 'waiting') { critter(m.kind, 'stand', m.x, m.y, t, m.sd); f.tiny('?', Math.round(m.x) + 3, Math.round(m.y) - 6); }
       else if (s === 'working') { if (critter(m.kind, tool, m.x, m.y, t, m.sd, m.dir) && m.hit) chips.hit(m.hit[0], m.y + 4, m.hit[1]); }
       else if (s === 'done') critter(m.kind, 'stand', m.x, m.y + hop(t, m.sd), t, m.sd);
@@ -337,7 +346,44 @@ function sky(w, t, dt) {
   } else flakes.length = 0;
 }
 
+// ---- families --------------------------------------------------------------
+// A session another one started (a worker in a channel) is that one's child:
+// a 5x5 of the parent's kind that works the family's bed beside it.
+const MINI = {
+  bun: ['.#.#.', '.###.', '#.#.#', '#####', '.#.#.'],
+  bot: ['..#..', '#####', '#.#.#', '#####', '.#.#.'],
+  cat: ['#...#', '#####', '#.#.#', '#####', '.#.#.'],
+  ghost: ['.###.', '#####', '#.#.#', '#####', '#.#.#'],
+  mush: ['.###.', '#####', '.#.#.', '.###.', '.#.#.'],
+  frog: ['##.##', '#.#.#', '#####', '#...#', '##.##'],
+  hat: ['.###.', '#####', '.#.#.', '.###.', '.#.#.'],
+  blob: ['.....', '.###.', '#.#.#', '#####', '#####'],
+};
+const MINI_SLEEP = ['.....', '.....', '.....', '.###.', '#####'];
+const MINI_SOUL = ['.#.', '#.#', '###', '#.#'];
+const DUCKLING = ['.#.', '###'];
+
+// Splits the rows into grown-ups and children. A child's family is its
+// oldest live ancestor; a parent off the rows (quiet for an hour) comes back
+// while its children are there. A child whose parent is parked or archived
+// is on its own.
+function families(a) {
+  const rowOf = new Map(a.rows.map(r => [r.id, r]));
+  const known = new Map((a.sessions || []).map(s => [s.id, s]));
+  const alive = id => { const x = rowOf.get(id) || known.get(id); return x && x.state !== 'archived' && x.state !== 'parked' ? x : null; };
+  const root = r => { let x = r; for (let i = 0; i < 6 && x.parent && alive(x.parent); i++) x = alive(x.parent); return x; };
+  const adults = [], kids = [];
+  a.rows.forEach(r => { const top = root(r); if (top === r) adults.push(r); else kids.push(Object.assign({}, r, { family: top.id, kind: kindOf(top) })); });
+  kids.forEach(k => {
+    if (adults.some(x => x.id === k.family)) return;
+    const p = alive(k.family);
+    adults.push({ id: p.id, name: p.name, state: p.state, parent: '', helpers: p.helpers || 0, kind: p.kind });
+  });
+  return Object.assign({}, a, { rows: adults, kids });
+}
+
 function farm(name, demo) {
+const kidMobs = new Map();
 const GROW_MS = demo ? 1500 : 180000;
 site(name, (a, t, st) => {
   const w = weatherOf(st.d, t, demo);
@@ -359,30 +405,41 @@ site(name, (a, t, st) => {
   const g = game(demo);
   g.harvest = g.harvest || 0;
   g.crops = g.crops || {};
-  mobs.forEach(m => {
-    if ((m.r.state === 'idle' || m.dying || m.home) && m.bed !== undefined) { if (m.ripe) g.harvest++; m.bed = undefined; m.work = 0; m.ripe = false; }
-    if (m.bed !== undefined) taken.add(m.bed);
+  // A family works one bed: busy while anyone in it works, ripe once nobody
+  // works and someone is done, harvested when all of it has been seen.
+  const kidsOf = new Map();
+  (a.kids || []).forEach(k => { if (!kidsOf.has(k.family)) kidsOf.set(k.family, []); kidsOf.get(k.family).push(k); });
+  mobs.forEach((m, id) => {
+    const ks = kidsOf.get(id) || [], st = m.r.state;
+    m.kids = ks;
+    m.busy = !m.dying && !m.home && (st === 'working' || ks.some(k => k.state === 'working'));
+    const ripe = !m.dying && !m.home && !m.busy && (st === 'done' || ks.some(k => k.state === 'done'));
+    if (m.bed !== undefined && !m.busy && !ripe) { if (m.ripe) g.harvest++; m.bed = undefined; m.work = 0; m.ripe = false; }
+    if (m.bed !== undefined) { m.ripe = ripe; taken.add(m.bed); }
   });
   // what the save keeps of each bed; a session gone for good takes its own
   const live = new Set((a.sessions || []).map(s => s.id));
   Object.keys(g.crops).forEach(id => { if (!live.has(id) && !mobs.has(id)) delete g.crops[id]; });
   mobs.forEach((m, id) => { if (m.bed === undefined) delete g.crops[id]; else g.crops[id] = { bed: m.bed, work: Math.round(m.work || 0), ripe: !!m.ripe }; });
-  by.working.forEach(r => {
-    const m = mobs.get(r.id);
-    if (m.bed === undefined) for (let s = 0; s < BEDS.length; s++) if (!taken.has(s)) { m.bed = s; taken.add(s); break; }
+  mobs.forEach(m => {
+    if (m.busy && m.bed === undefined) for (let s = 0; s < BEDS.length; s++) if (!taken.has(s)) { m.bed = s; taken.add(s); break; }
   });
   asking(by, mobs);
-  slots(by, mobs, 'idle', [[0, 12], [8, 12]], i => [(i - 2) * 8, 4]);
+  // sleepers by the house; a parent whose children work stands at the bed
+  const sleepers = by.idle.filter(r => mobs.get(r.id).bed === undefined);
+  slots({ idle: sleepers }, mobs, 'idle', [[0, 12], [8, 12]], i => [(i - 2) * 8, 4]);
   mobs.forEach(m => {
     const s = m.r.state;
+    m.pose = undefined;
     if (m.dying || m.home) return;
-    if (s === 'done' && m.bed !== undefined) m.ripe = true;
-    if (s !== 'working' && s !== 'done') return;
-    if (m.bed === undefined) { wander(m, dt, [[0, 100, 20, 104]]); return; }
+    if (m.bed !== undefined && m.busy) m.work = (m.work || 0) + dt;
+    if (s === 'waiting') return;
+    if (m.bed === undefined) { if (s === 'working' || s === 'done') wander(m, dt, [[0, 100, 20, 104]]); return; }
     m.tx = 1; m.ty = BEDS[m.bed];
-    if (s === 'working' && !m.moving) m.work = (m.work || 0) + dt;
+    if (s === 'idle') m.pose = 'stand';
   });
-}, (a, mobs) => {
+  st.waitingAdults = by.waiting.length;
+}, (a, mobs, t, dt, st) => {
   mobs.forEach(m => {
     if (m.bed === undefined) return;
     const soil = BEDS[m.bed] + 8, g = (m.work || 0) / GROW_MS, crop = cropOf(m.kind);
@@ -391,12 +448,63 @@ site(name, (a, t, st) => {
       else { const st = Math.floor(g - i * 0.6); if (st >= 0) plant(STAGES[Math.min(st, STAGES.length - 1)], x, soil); }
     });
   });
+  children(a, mobs, t, dt, st);
+  // subagents running inside a turn: ducklings hopping over its head
+  mobs.forEach(m => {
+    const n = Math.min(m.r.helpers || 0, 3);
+    for (let i = 0; i < n; i++) f.sprite(DUCKLING, Math.round(m.x) + i * 3 - 1 + (n === 1 ? 2 : 0), Math.round(m.y) - 3 + (Math.floor(t / 250 + i) % 2 ? -1 : 0));
+  });
 }, {
   demo, tool: 'water',
   // a creature comes back to the bed the save says it had
   born: (m, r) => { const c = (game(demo).crops || {})[r.id]; if (c) { m.bed = c.bed; m.work = c.work; m.ripe = c.ripe; } },
   died: () => { const g = game(demo); g.departed = (g.departed || 0) + 1; },
+  prepare: families,
 });
+
+// The children: beside their parent's bed while it is worked (each at a
+// plant), at the fence when they ask, curled up by their parent when idle,
+// and a small ghost when archived.
+function children(a, mobs, t, dt, st) {
+  const kids = a.kids || [], seen = new Set(), gone = new Map((a.sessions || []).map(s => [s.id, s.state]));
+  let waitAt = (st.waitingAdults || 0) * 8;
+  const slotOf = new Map(), idleOf = new Map();
+  kids.forEach(k => {
+    seen.add(k.id);
+    const p = mobs.get(k.family);
+    let c = kidMobs.get(k.id);
+    if (!c) { c = { x: p ? p.x + 2 : 24, y: p ? p.y + 3 : 10, sd: seedOf(k.id) }; kidMobs.set(k.id, c); }
+    c.k = k; c.kind = k.kind;
+    if (k.state === 'waiting') { c.tx = Math.min(waitAt, 27); c.ty = 116; waitAt += 6; }
+    else if (p && p.bed !== undefined && k.state !== 'idle') {
+      const j = slotOf.get(k.family) || 0; slotOf.set(k.family, j + 1);
+      c.tx = Math.min(14 + j * 5, 27); c.ty = BEDS[p.bed] + 11; // on the path, under its plant
+    } else if (p) {
+      const j = idleOf.get(k.family) || 0; idleOf.set(k.family, j + 1);
+      c.tx = Math.min(Math.round(p.tx) + 9 + j * 5, 27); c.ty = p.ty + 3;
+    } else { c.tx = 12; c.ty = 16; }
+  });
+  kidMobs.forEach((c, id) => {
+    if (!seen.has(id) && !c.dying) { if (gone.get(id) === 'archived') c.dying = t; else { kidMobs.delete(id); return; } }
+    const x = Math.round(c.x), y = Math.round(c.y), rows = MINI[c.kind] || MINI.blob;
+    if (c.dying) {
+      const age = t - c.dying;
+      if (age > 2600) { kidMobs.delete(id); return; }
+      fade(MINI_SLEEP, x, y, age < 400 ? 1 : Math.max(0, 1 - (age - 400) / 900));
+      if (age >= 400) { const k = (age - 400) / 2200; fade(MINI_SOUL, x + 1, y - Math.round(k * Math.min(16, y + 2)), k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4); }
+      return;
+    }
+    const moving = walk(c, c.tx, c.ty, dt), s = c.k.state;
+    if (moving) { f.sprite(rows, x, y + (Math.floor(t / 160 + c.sd) % 2)); return; }
+    if (s === 'working') { // bobbing over its plant, a drop now and then
+      f.sprite(rows, x, y + (Math.floor(t / 400 + c.sd) % 2));
+      const p = (t + c.sd * 97) % 1200;
+      if (p < 400) f.px(x + 2, y - 2 - Math.floor(p / 200)); // a drop flicked up at its plant
+    } else if (s === 'waiting') { f.sprite(rows, x, y); f.tiny('?', x + 1, y - 6); }
+    else if (s === 'done') f.sprite(rows, x, y + hop(t, c.sd));
+    else f.sprite(MINI_SLEEP, x, y);
+  });
+}
 }
 farm('farm', false);
 farm('farmdemo', true);

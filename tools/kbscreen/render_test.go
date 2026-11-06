@@ -59,7 +59,7 @@ func TestBuiltInScreensRender(t *testing.T) {
 	if d := testData(true, nil); d.Media.Title != "Bjork - Joga" || d.Sys.Clock != "14:53" {
 		t.Fatalf("data: %q %q", d.Media.Title, d.Sys.Clock)
 	}
-	agents := &Agents{Rows: []AgentRow{{"QMK", agentWorking, "a"}, {"SEISI", agentWaiting, "b"}}, Running: 1, Waiting: 2,
+	agents := &Agents{Rows: []AgentRow{{Name: "QMK", State: agentWorking, ID: "a"}, {Name: "SEISI", State: agentWaiting, ID: "b"}}, Running: 1, Waiting: 2,
 		LaterWaiting: 1, OldestWait: 72 * time.Hour, NewQuestion: true}
 	seen := map[string][]byte{}
 	for _, c := range []struct {

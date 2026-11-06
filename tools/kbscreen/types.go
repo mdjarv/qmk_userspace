@@ -51,9 +51,11 @@ type Media struct {
 }
 
 type AgentRow struct {
-	Name  string
-	State uint8
-	ID    string
+	Name    string
+	State   uint8
+	ID      string
+	Parent  string // the session that started this one ("" for a top-level one)
+	Helpers int    // subagents running inside its turn
 }
 
 // Session is one session as the game sees it: live, parked, or archived in
@@ -63,6 +65,8 @@ type Session struct {
 	State    uint8
 	Turns    int
 	Merged   bool
+	Parent   string
+	Helpers  int
 }
 
 // Totals count every session Agentique lists, archived ones included.

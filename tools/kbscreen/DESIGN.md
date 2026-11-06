@@ -39,6 +39,7 @@ From four rounds on 2026-11-06; the farm is the page that comes up by itself.
 - **No speech bubbles**: a bare `?` over the head; bubbles were noise at this spacing.
 - **Nothing below the fence**: names and counts under it confused. Old questions are a mailbox with its flag up.
 - **Archived, a creature dies**: it keels over and its ghost rises and thins out.
+- **Hierarchy is family** (first take, unjudged): a session another started is its child, a 5x5 of the parent's kind on the path under the family bed; a lead idle while its children work stands at the bed. Subagents inside a turn are ducklings over the head.
 
 ## Working method
 
