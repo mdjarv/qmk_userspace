@@ -197,8 +197,8 @@ func TestServeFramesReportsForHidraw(t *testing.T) {
 	}
 }
 
-// A server on another host: the URL is used as given and the token goes in
-// the Authorization header.
+// A server on another host, from the config file: its URL is used as given
+// and the token goes in the Authorization header.
 func TestRemoteAgentiqueClient(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer aqt_test" {
@@ -215,9 +215,11 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 		}
 	}))
 	defer srv.Close()
-	c, err := newRemoteAgentiqueClient(srv.URL+"/", "aqt_test")
-	if err != nil {
-		t.Fatal(err)
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	write(t, cfg, []byte("[agentique]\nurl = \""+srv.URL+"/\"  # the other host\ntoken = \"aqt_test\"\n"))
+	c := agentiqueFromConfig(cfg, t.TempDir())
+	if c == nil {
+		t.Fatal("no client from config")
 	}
 	a, err := c.agents(context.Background())
 	if err != nil || len(a.Rows) != 1 || a.Rows[0] != (AgentRow{"QMK", agentWorking}) {

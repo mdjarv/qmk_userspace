@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -46,11 +45,8 @@ func (s *state) poke() {
 
 func main() {
 	home, _ := os.UserHomeDir()
-	agentiqueDir := flag.String("agentique-config", filepath.Join(home, ".config/agentique"), "local Agentique config directory, used when no URL is given")
-	agentiqueURL := flag.String("agentique-url", os.Getenv("AGENTIQUE_URL"),
-		"Agentique server on another host, e.g. https://host.tailnet.ts.net:19201 (default $AGENTIQUE_URL; unset uses the local server)")
-	tokenFile := flag.String("token-file", filepath.Join(home, ".config/kbscreen/agentique-token"),
-		"file holding an Agentique read token (agentique tokens add --perm read); AGENTIQUE_TOKEN overrides")
+	config := flag.String("config", filepath.Join(home, ".config/kbscreen/config.toml"),
+		"config file: [agentique] url and token (see README)")
 	dry := flag.Bool("dry", false, "print what would be sent once a second instead of sending it")
 	flag.Parse()
 	log.SetFlags(0)
@@ -63,7 +59,7 @@ func main() {
 
 	go pollSys(ctx, st)
 	go watchMedia(ctx, st, spectrum)
-	if c := agentiqueFromConfig(*agentiqueURL, *agentiqueDir, *tokenFile); c != nil {
+	if c := agentiqueFromConfig(*config, filepath.Join(home, ".config/agentique")); c != nil {
 		go pollAgents(ctx, st, c)
 	}
 
@@ -88,22 +84,27 @@ func main() {
 	}
 }
 
-func agentiqueFromConfig(remote, dir, tokenFile string) *agentiqueClient {
-	token := os.Getenv("AGENTIQUE_TOKEN")
+// agentiqueFromConfig makes the Agentique client from kbscreen's config file:
+//
+//	[agentique]
+//	url = "https://host.tailnet.ts.net:19201"  # optional; unset means this machine's server
+//	token = "aqt_..."                           # agentique tokens add kbscreen --perm read
+func agentiqueFromConfig(path, localDir string) *agentiqueClient {
+	cfg, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("agents: %v; the agent screen stays off", err)
+		return nil
+	}
+	token, remote := tomlString(cfg, "token"), tomlString(cfg, "url")
 	if token == "" {
-		b, err := os.ReadFile(tokenFile)
-		if err != nil {
-			log.Printf("agents: no token (%v); the agent screen stays off", err)
-			return nil
-		}
-		token = strings.TrimSpace(string(b))
+		log.Printf("agents: no token in %s; the agent screen stays off", path)
+		return nil
 	}
 	var c *agentiqueClient
-	var err error
 	if remote != "" {
 		c, err = newRemoteAgentiqueClient(remote, token)
 	} else {
-		c, err = newAgentiqueClient(dir, token)
+		c, err = newAgentiqueClient(localDir, token)
 	}
 	if err != nil {
 		log.Printf("agents: %v; the agent screen stays off", err)

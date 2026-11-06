@@ -3,8 +3,6 @@ Description=Feed the Sofle's left OLED (kbscreen)
 After=pipewire-pulse.service
 
 [Service]
-# AGENTIQUE_URL=https://host.tailnet.ts.net:19201 for a server on another host
-EnvironmentFile=-%h/.config/kbscreen/env
 ExecStart=%h/.local/bin/kbscreen
 Restart=on-failure
 RestartSec=5

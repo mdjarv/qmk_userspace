@@ -11,7 +11,7 @@ External QMK userspace for one keyboard: splitkb Aurora Sofle v2 with Liatris (R
   - `screens.c`, `fb.c`, `hostdata.[ch]`: the left (USB) OLED's host-data screens. `hostdata.h` is the Raw HID protocol; `tools/kbscreen/protocol.go` must match it. Don't name a keymap header after a QMK one (`host.h` shadowed QMK's and broke `sofle_v2.c`).
   - `config.h`, `rules.mk`: only what keymap.json cannot express.
 - `tools/kbflash/`: Go (Bubble Tea) tool behind `make flash|backup|restore|drill`. Halves are recognised by RP2040 flash ID from `kbflash.json`; picotool `--ser` matches the flash ID, not the USB serial. Tests: `got --report .` in that directory (a fake picotool and fake sysfs drive the real flow).
-- `tools/kbscreen/`: Go daemon feeding the left OLED over Raw HID: /proc and hwmon, playerctl + wpctl/pactl, parec spectrum, Agentique's read API (read token in `~/.config/kbscreen/agentique-token`; `AGENTIQUE_URL` in `~/.config/kbscreen/env` for a server on another host). `make screen` runs it (`DRY=1` prints instead of sending), `make screen-install` installs the systemd user unit; the udev rule `70-kbscreen.rules` must be installed by hand with sudo. Tests: `got --report .` in that directory.
+- `tools/kbscreen/`: Go daemon feeding the left OLED over Raw HID: /proc and hwmon, playerctl + wpctl/pactl, parec spectrum, Agentique's read API (`url` and read `token` in `~/.config/kbscreen/config.toml`). `make screen` runs it (`DRY=1` prints instead of sending), `make screen-install` installs the systemd user unit; the udev rule `70-kbscreen.rules` must be installed by hand with sudo. Tests: `got --report .` in that directory.
 - `archive/vial-2026-10-21.vil`: the Vial layout this keymap came from.
 
 ## Workflow
