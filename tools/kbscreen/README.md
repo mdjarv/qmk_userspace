@@ -4,7 +4,7 @@ Feeds the Sofle's left OLED over Raw HID. The keyboard decides what to show; thi
 
 | Screen | Source |
 |---|---|
-| Core grid | `/proc/stat`, `/proc/meminfo`, hwmon `k10temp` and `amdgpu`, `gpu_busy_percent` |
+| Perf | `/proc/stat`, `/proc/meminfo`, hwmon `k10temp` and `amdgpu`, `gpu_busy_percent`; the keyboard keeps the history |
 | Music | `playerctl` (MPRIS) for track and art, `wpctl`/`pactl` for volume, `parec` on the default monitor for the spectrum |
 | Agents | Agentique's read API: `url` in kbscreen's config, or the local server from `~/.config/agentique/config.toml` |
 

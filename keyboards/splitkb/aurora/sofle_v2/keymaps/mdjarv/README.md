@@ -17,8 +17,8 @@ Behaviour worth knowing:
 - **Esc / Right Shift** is one mod-tap key. Permissive hold makes pressing and releasing another key while it is down count as Shift.
 - **Knobs**: left is volume, right is scroll; both do nothing on Lower. Pressing the right knob shows the next left-OLED screen.
 - **Debounce** is `asym_eager_defer_pk` at 10 ms: presses register at once, releases wait 10 ms of stable contact, which swallows switch chatter.
-- **Left OLED** shows what `tools/kbscreen` sends from the computer. An agent waiting on you shows the agent board; otherwise music playing shows the music screen; otherwise the CPU core grid. A knob press shows the next screen until that choice changes. A volume change shows a volume readout over any screen for 1.5 s. Without data for 3 s the cat comes back.
-- **Right OLED** is the headphones animation, nothing else.
+- **Left OLED** shows what `tools/kbscreen` sends from the computer. An agent waiting on you shows the agent board; otherwise music playing shows the music screen; otherwise perf: line graphs of the last 32 s of CPU, GPU, RAM, temperature and power. A knob press shows the next screen until that choice changes. A volume change shows a volume readout over any screen for 1.5 s. Without data for 3 s the cat comes back.
+- **Right OLED** is the top half of the headphones animation (the amazed face in game mode) over the layer icon and the Gui/Alt/Ctrl/Shift tiles.
 - **OLEDs** blank after 60 s without input. RGB is off.
 
 The layout came from the Vial backup in `archive/vial-2026-10-21.vil`.

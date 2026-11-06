@@ -1,5 +1,7 @@
 // OLED screens. USB half (left): host data from tools/kbscreen, see screens.c.
-// Other half: the headphones animation, or the amazed face on the game layer.
+// Other half: the top half of the headphones animation (the amazed face on the
+// game layer) over the layer icon and the modifier tiles.
+// Status rendering originally from crkbd/soundmonster, via splitkb's sofle_v2.c.
 #include QMK_KEYBOARD_H
 #include "layers.h"
 #include "screens.h"
@@ -8,12 +10,174 @@
 
 #define OLED_IDLE_TIMEOUT 60000 // ms without input before both screens blank
 
-static void render_slave(void) {
-    if (get_highest_layer(layer_state | default_layer_state) == _GAME) {
-        render_animation(&gfx_amazed_animation);
+static void render_mod_status_gui_alt(uint8_t modifiers) {
+    static const char PROGMEM gui_off_1[] = {0x85, 0x86, 0};
+    static const char PROGMEM gui_off_2[] = {0xa5, 0xa6, 0};
+    static const char PROGMEM gui_on_1[]  = {0x8d, 0x8e, 0};
+    static const char PROGMEM gui_on_2[]  = {0xad, 0xae, 0};
+
+    static const char PROGMEM alt_off_1[] = {0x87, 0x88, 0};
+    static const char PROGMEM alt_off_2[] = {0xa7, 0xa8, 0};
+    static const char PROGMEM alt_on_1[]  = {0x8f, 0x90, 0};
+    static const char PROGMEM alt_on_2[]  = {0xaf, 0xb0, 0};
+
+    // fillers between the modifier icons bleed into the icon frames
+    static const char PROGMEM off_off_1[] = {0xc5, 0};
+    static const char PROGMEM off_off_2[] = {0xc6, 0};
+    static const char PROGMEM on_off_1[]  = {0xc7, 0};
+    static const char PROGMEM on_off_2[]  = {0xc8, 0};
+    static const char PROGMEM off_on_1[]  = {0xc9, 0};
+    static const char PROGMEM off_on_2[]  = {0xca, 0};
+    static const char PROGMEM on_on_1[]   = {0xcb, 0};
+    static const char PROGMEM on_on_2[]   = {0xcc, 0};
+
+    if (modifiers & MOD_MASK_GUI) {
+        oled_write_P(gui_on_1, false);
     } else {
-        render_animation(&gfx_headphones_animation);
+        oled_write_P(gui_off_1, false);
     }
+
+    if ((modifiers & MOD_MASK_GUI) && (modifiers & MOD_MASK_ALT)) {
+        oled_write_P(on_on_1, false);
+    } else if (modifiers & MOD_MASK_GUI) {
+        oled_write_P(on_off_1, false);
+    } else if (modifiers & MOD_MASK_ALT) {
+        oled_write_P(off_on_1, false);
+    } else {
+        oled_write_P(off_off_1, false);
+    }
+
+    if (modifiers & MOD_MASK_ALT) {
+        oled_write_P(alt_on_1, false);
+    } else {
+        oled_write_P(alt_off_1, false);
+    }
+
+    if (modifiers & MOD_MASK_GUI) {
+        oled_write_P(gui_on_2, false);
+    } else {
+        oled_write_P(gui_off_2, false);
+    }
+
+    if ((modifiers & MOD_MASK_GUI) && (modifiers & MOD_MASK_ALT)) {
+        oled_write_P(on_on_2, false);
+    } else if (modifiers & MOD_MASK_GUI) {
+        oled_write_P(on_off_2, false);
+    } else if (modifiers & MOD_MASK_ALT) {
+        oled_write_P(off_on_2, false);
+    } else {
+        oled_write_P(off_off_2, false);
+    }
+
+    if (modifiers & MOD_MASK_ALT) {
+        oled_write_P(alt_on_2, false);
+    } else {
+        oled_write_P(alt_off_2, false);
+    }
+}
+
+static void render_mod_status_ctrl_shift(uint8_t modifiers) {
+    static const char PROGMEM ctrl_off_1[] = {0x89, 0x8a, 0};
+    static const char PROGMEM ctrl_off_2[] = {0xa9, 0xaa, 0};
+    static const char PROGMEM ctrl_on_1[]  = {0x91, 0x92, 0};
+    static const char PROGMEM ctrl_on_2[]  = {0xb1, 0xb2, 0};
+
+    static const char PROGMEM shift_off_1[] = {0x8b, 0x8c, 0};
+    static const char PROGMEM shift_off_2[] = {0xab, 0xac, 0};
+    static const char PROGMEM shift_on_1[]  = {0xcd, 0xce, 0};
+    static const char PROGMEM shift_on_2[]  = {0xcf, 0xd0, 0};
+
+    // fillers between the modifier icons bleed into the icon frames
+    static const char PROGMEM off_off_1[] = {0xc5, 0};
+    static const char PROGMEM off_off_2[] = {0xc6, 0};
+    static const char PROGMEM on_off_1[]  = {0xc7, 0};
+    static const char PROGMEM on_off_2[]  = {0xc8, 0};
+    static const char PROGMEM off_on_1[]  = {0xc9, 0};
+    static const char PROGMEM off_on_2[]  = {0xca, 0};
+    static const char PROGMEM on_on_1[]   = {0xcb, 0};
+    static const char PROGMEM on_on_2[]   = {0xcc, 0};
+
+    if (modifiers & MOD_MASK_CTRL) {
+        oled_write_P(ctrl_on_1, false);
+    } else {
+        oled_write_P(ctrl_off_1, false);
+    }
+
+    if ((modifiers & MOD_MASK_CTRL) && (modifiers & MOD_MASK_SHIFT)) {
+        oled_write_P(on_on_1, false);
+    } else if (modifiers & MOD_MASK_CTRL) {
+        oled_write_P(on_off_1, false);
+    } else if (modifiers & MOD_MASK_SHIFT) {
+        oled_write_P(off_on_1, false);
+    } else {
+        oled_write_P(off_off_1, false);
+    }
+
+    if (modifiers & MOD_MASK_SHIFT) {
+        oled_write_P(shift_on_1, false);
+    } else {
+        oled_write_P(shift_off_1, false);
+    }
+
+    if (modifiers & MOD_MASK_CTRL) {
+        oled_write_P(ctrl_on_2, false);
+    } else {
+        oled_write_P(ctrl_off_2, false);
+    }
+
+    if ((modifiers & MOD_MASK_CTRL) && (modifiers & MOD_MASK_SHIFT)) {
+        oled_write_P(on_on_2, false);
+    } else if (modifiers & MOD_MASK_CTRL) {
+        oled_write_P(on_off_2, false);
+    } else if (modifiers & MOD_MASK_SHIFT) {
+        oled_write_P(off_on_2, false);
+    } else {
+        oled_write_P(off_off_2, false);
+    }
+
+    if (modifiers & MOD_MASK_SHIFT) {
+        oled_write_P(shift_on_2, false);
+    } else {
+        oled_write_P(shift_off_2, false);
+    }
+}
+
+static void render_layer_state(void) {
+    static const char PROGMEM default_layer[] = {0x20, 0x94, 0x95, 0x96, 0x20, 0x20, 0xb4, 0xb5, 0xb6, 0x20, 0x20, 0xd4, 0xd5, 0xd6, 0x20, 0};
+    static const char PROGMEM raise_layer[]   = {0x20, 0x97, 0x98, 0x99, 0x20, 0x20, 0xb7, 0xb8, 0xb9, 0x20, 0x20, 0xd7, 0xd8, 0xd9, 0x20, 0};
+    static const char PROGMEM lower_layer[]   = {0x20, 0x9a, 0x9b, 0x9c, 0x20, 0x20, 0xba, 0xbb, 0xbc, 0x20, 0x20, 0xda, 0xdb, 0xdc, 0x20, 0};
+    static const char PROGMEM adjust_layer[]  = {0x20, 0x9d, 0x9e, 0x9f, 0x20, 0x20, 0xbd, 0xbe, 0xbf, 0x20, 0x20, 0xdd, 0xde, 0xdf, 0x20, 0};
+
+    switch (get_highest_layer(layer_state | default_layer_state)) {
+        case _LOWER:
+            oled_write_P(lower_layer, false);
+            break;
+        case _RAISE:
+            oled_write_P(raise_layer, false);
+            break;
+        case _GAME:
+            oled_write_P(adjust_layer, false);
+            break;
+        default:
+            oled_write_P(default_layer, false);
+    }
+}
+
+static void render_slave(void) {
+    // Lines 0-7: half of the animation. The headphones art's top half is the
+    // notes and the head; the amazed face lives in the bottom half.
+    if (get_highest_layer(layer_state | default_layer_state) == _GAME) {
+        render_animation_part(&gfx_amazed_animation, 256, 256);
+    } else {
+        render_animation_part(&gfx_headphones_animation, 0, 256);
+    }
+    // Lines 8-10 layer, 11 blank, 12-15 modifiers.
+    oled_set_cursor(0, 8);
+    render_layer_state();
+    oled_write_P(PSTR("     "), false);
+    uint8_t mods = get_mods() | get_oneshot_mods();
+    render_mod_status_gui_alt(mods);
+    render_mod_status_ctrl_shift(mods);
 }
 
 // Master decides on/off from input activity; SPLIT_OLED syncs that to the slave.

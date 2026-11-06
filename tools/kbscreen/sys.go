@@ -13,26 +13,21 @@ import (
 // first read reports zero load.
 type sysReader struct {
 	root string
-	prev map[string]cpuTimes
+	prev cpuTimes // the last /proc/stat total
+	seen bool
 }
 
 type cpuTimes struct{ busy, total uint64 }
 
 func newSysReader(root string) *sysReader {
-	return &sysReader{root: root, prev: map[string]cpuTimes{}}
+	return &sysReader{root: root}
 }
 
 func (r *sysReader) path(p string) string { return filepath.Join(r.root, p) }
 
 func (r *sysReader) read() Sys {
 	var s Sys
-	loads := r.cpuLoads()
-	if total, ok := loads["cpu"]; ok {
-		s.CPU = uint8(total*100 + 0.5)
-	}
-	for i := range threadMax {
-		s.Threads[i] = uint8(loads["cpu"+strconv.Itoa(i)]*15 + 0.5)
-	}
+	s.CPU = uint8(r.cpuLoad()*100 + 0.5)
 	s.RAM = r.memPercent()
 	s.Temp = uint8(r.hwmon("k10temp", "temp1_input") / 1000)
 	watts := r.hwmon("amdgpu", "power1_input")
@@ -44,41 +39,38 @@ func (r *sysReader) read() Sys {
 	return s
 }
 
-// cpuLoads returns the busy share (0..1) since the last call, per /proc/stat
-// line: "cpu" for the total, "cpuN" per thread.
-func (r *sysReader) cpuLoads() map[string]float64 {
+// cpuLoad returns the busy share (0..1) of all CPUs since the last call.
+func (r *sysReader) cpuLoad() float64 {
 	f, err := os.Open(r.path("proc/stat"))
 	if err != nil {
-		return nil
+		return 0
 	}
 	defer f.Close()
-	loads := map[string]float64{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
-		if len(fields) < 5 || !strings.HasPrefix(fields[0], "cpu") {
+		if len(fields) < 5 || fields[0] != "cpu" {
 			continue
 		}
 		var t cpuTimes
 		for i, v := range fields[1:] {
-			n, _ := strconv.ParseUint(v, 10, 64)
 			if i >= 8 { // guest time is already counted in user
 				break
 			}
+			n, _ := strconv.ParseUint(v, 10, 64)
 			t.total += n
 			if i != 3 && i != 4 { // idle, iowait
 				t.busy += n
 			}
 		}
-		if p, ok := r.prev[fields[0]]; ok && t.total > p.total {
-			loads[fields[0]] = float64(t.busy-p.busy) / float64(t.total-p.total)
+		p, ok := r.prev, r.seen
+		r.prev, r.seen = t, true
+		if !ok || t.total <= p.total {
+			return 0
 		}
-		r.prev[fields[0]] = t
+		return float64(t.busy-p.busy) / float64(t.total-p.total)
 	}
-	if sc.Err() != nil {
-		return nil
-	}
-	return loads
+	return 0
 }
 
 func (r *sysReader) memPercent() uint8 {

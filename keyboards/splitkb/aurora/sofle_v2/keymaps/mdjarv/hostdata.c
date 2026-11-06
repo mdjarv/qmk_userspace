@@ -17,6 +17,16 @@ static uint32_t now(void) {
     return t ? t : 1;
 }
 
+static void record_history(const uint8_t sample[5]) {
+    if (host.history_len < HOST_HISTORY) {
+        host.history_len++;
+    }
+    for (uint8_t m = 0; m < 5; m++) {
+        memmove(host.history[m], host.history[m] + 1, HOST_HISTORY - 1);
+        host.history[m][HOST_HISTORY - 1] = sample[m];
+    }
+}
+
 static void receive_text(const uint8_t *d) {
     char   *dst   = d[1] == 0 ? host.title : d[1] == 1 ? host.artist : NULL;
     uint8_t total = d[2], off = d[3];
@@ -52,9 +62,7 @@ void raw_hid_receive(uint8_t *d, uint8_t length) {
             host.ram   = d[3];
             host.gpu   = d[4];
             host.power = d[5];
-            for (uint8_t i = 0; i < HOST_THREADS; i++) {
-                host.threads[i] = (d[6 + i / 2] >> ((i & 1) * 4)) & 0x0F;
-            }
+            record_history((uint8_t[]){host.cpu, host.gpu, host.ram, host.temp, host.power});
             host.last_sys = now();
             break;
         case HOST_MEDIA: {

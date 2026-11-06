@@ -41,16 +41,6 @@ func TestFindRawHIDPicksRawInterface(t *testing.T) {
 	}
 }
 
-// hostdata.c reads thread 2i from the low nibble and 2i+1 from the high one.
-func TestSysReportPacksThreadsLowNibbleFirst(t *testing.T) {
-	s := Sys{CPU: 47}
-	s.Threads[0], s.Threads[1], s.Threads[31] = 3, 12, 15
-	r := s.report()
-	if r[0] != msgSys || r[1] != 47 || r[6] != 0xC3 || r[21] != 0xF0 {
-		t.Fatalf("report = % x", r)
-	}
-}
-
 func TestTextReportsChunkAndClear(t *testing.T) {
 	long := ""
 	for len(long) < 70 {
@@ -123,18 +113,17 @@ func TestDitherArtOLEDLayout(t *testing.T) {
 	}
 }
 
-func TestCPULoadsFromStatDeltas(t *testing.T) {
+func TestCPULoadFromStatDeltas(t *testing.T) {
 	root := t.TempDir()
-	write(t, root+"/proc/stat", []byte("cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 100 0 0 0 0 0 0 0 0 0\ncpu1 0 0 0 100 0 0 0 0 0 0\nintr 1\n"))
+	write(t, root+"/proc/stat", []byte("cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 100 0 0 0 0 0 0 0 0 0\nintr 1\n"))
 	r := newSysReader(root)
 	if s := r.read(); s.CPU != 0 {
 		t.Fatalf("first read CPU = %d, want 0", s.CPU)
 	}
-	// +300 busy, +100 idle on the total; cpu0 fully busy, cpu1 idle
-	write(t, root+"/proc/stat", []byte("cpu  250 0 250 900 0 0 0 0 0 0\ncpu0 200 0 0 0 0 0 0 0 0 0\ncpu1 0 0 0 200 0 0 0 0 0 0\n"))
-	s := r.read()
-	if s.CPU != 75 || s.Threads[0] != 15 || s.Threads[1] != 0 {
-		t.Fatalf("CPU = %d, threads %v", s.CPU, s.Threads[:2])
+	// +300 busy, +100 idle, +50 guest (already in user, so not counted twice)
+	write(t, root+"/proc/stat", []byte("cpu  250 0 250 900 0 0 0 0 50 0\n"))
+	if s := r.read(); s.CPU != 75 {
+		t.Fatalf("CPU = %d, want 75", s.CPU)
 	}
 }
 

@@ -1,5 +1,5 @@
 // Left OLED screens drawn from host data (hostdata.h):
-//   SYS     core grid: 32 thread loads, CPU %, temperature, RAM, GPU, power
+//   SYS     line graphs of CPU, GPU, RAM, temperature and power
 //   MUSIC   album art, scrolling title and artist, spectrum, track position
 //   AGENTS  Agentique sessions: working, waiting on you, done, idle
 // The context picks one (an agent waiting, else music playing, else SYS). The
@@ -47,27 +47,42 @@ static void bar(int y, uint8_t pct) {
     fb_fill(0, y + 1, MIN(pct, 100) * FB_W / 100, 1, true);
 }
 
-static void render_sys(void) {
-    char buf[12];
-    snprintf(buf, sizeof(buf), "%2u", MIN(host.cpu, 99));
-    fb_text(buf, 0, 1, 2, true);
-    fb_tiny("%", 26, 11, true);
-    for (int i = 0; i < HOST_THREADS; i++) {
-        int x = (i % 4) * 8, y = 20 + (i / 4) * 8;
-        int h = (host.threads[i] * 7 + 7) / 15;
-        fb_rect(x, y, 7, 7);
-        fb_fill(x, y + 7 - h, 7, h, true);
+// A line graph of one metric's history, h rows tall, newest at the right edge,
+// filling in from the right while history is short. lo..hi spans the height.
+static void graph(int y0, int h, enum host_metric m, uint8_t lo, uint8_t hi) {
+    int prev = -1;
+    for (int i = 0; i < host.history_len; i++) {
+        int x = FB_W - host.history_len + i;
+        int v = host.history[m][HOST_HISTORY - host.history_len + i];
+        v     = (MIN(MAX(v, lo), hi) - lo) * (h - 1) / (hi - lo);
+        int y = y0 + h - 1 - v;
+        if (prev < 0) prev = y;
+        for (int k = MIN(prev, y); k <= MAX(prev, y); k++) fb_px(x, k, true);
+        prev = y;
     }
-    snprintf(buf, sizeof(buf), "TMP %u*", host.temp);
-    fb_tiny(buf, 0, 88, true);
-    snprintf(buf, sizeof(buf), "RAM %u%%", host.ram);
-    fb_tiny(buf, 0, 96, true);
-    bar(102, host.ram);
-    snprintf(buf, sizeof(buf), "GPU %u%%", host.gpu);
-    fb_tiny(buf, 0, 108, true);
-    bar(114, host.gpu);
-    snprintf(buf, sizeof(buf), "PWR %uW", host.power);
-    fb_tiny(buf, 0, 121, true);
+}
+
+// Power has no natural ceiling: scale to the history's peak, at least 20 W.
+static uint8_t power_peak(void) {
+    uint8_t peak = 20;
+    for (int i = HOST_HISTORY - host.history_len; i < HOST_HISTORY; i++) peak = MAX(peak, host.history[METRIC_POWER][i]);
+    return peak;
+}
+
+static void render_sys(void) {
+    static const char *const labels[] = {"CPU", "GPU", "RAM", "TMP", "PWR"};
+    static const char *const units[]  = {"%", "%", "%", "*", "W"};
+    const uint8_t            now[]    = {host.cpu, host.gpu, host.ram, host.temp, host.power};
+    const uint8_t            lo[]     = {0, 0, 0, 30, 0};
+    const uint8_t            hi[]     = {100, 100, 100, 100, power_peak()};
+    char                     buf[8];
+    for (int m = 0; m < 5; m++) {
+        int y = m * 26;
+        fb_tiny(labels[m], 0, y, true);
+        snprintf(buf, sizeof(buf), "%u%s", now[m], units[m]);
+        fb_tiny(buf, FB_W + 1 - fb_tiny_width(buf), y, true);
+        graph(y + 7, 16, m, lo[m], hi[m]);
+    }
 }
 
 // Scrolls text that does not fit; text that fits stands still.

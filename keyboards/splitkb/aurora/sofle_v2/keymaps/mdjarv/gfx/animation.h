@@ -11,11 +11,17 @@ typedef struct {
     uint16_t        timer;       // when the current frame started
 } Animation;
 
-// Draws the current frame at the cursor, advancing when its delay has passed.
-static inline void render_animation(Animation *anim) {
+// Draws len bytes of the current frame from offset at the cursor, advancing
+// when its delay has passed.
+static inline void render_animation_part(Animation *anim, uint16_t offset, uint16_t len) {
     if (timer_elapsed(anim->timer) >= anim->delays[anim->idx]) {
         anim->idx   = (anim->idx + 1) % anim->frame_count;
         anim->timer = timer_read();
     }
-    oled_write_raw_P(anim->frames + (anim->idx * anim->frame_size), anim->frame_size);
+    oled_write_raw_P(anim->frames + (anim->idx * anim->frame_size) + offset, len);
+}
+
+// Draws the current frame at the cursor, advancing when its delay has passed.
+static inline void render_animation(Animation *anim) {
+    render_animation_part(anim, 0, anim->frame_size);
 }

@@ -26,7 +26,6 @@ const (
 	artSize    = 128
 	artChunk   = 28
 	bandCount  = 10
-	threadMax  = 32
 	agentRows  = 8
 	agentChunk = 4
 )
@@ -40,15 +39,10 @@ const (
 
 type Sys struct {
 	CPU, Temp, RAM, GPU, Power uint8
-	Threads                    [threadMax]uint8 // 0..15
 }
 
 func (s Sys) report() report {
-	r := report{msgSys, s.CPU, s.Temp, s.RAM, s.GPU, s.Power}
-	for i, v := range s.Threads {
-		r[6+i/2] |= min(v, 15) << (4 * (i % 2))
-	}
-	return r
+	return report{msgSys, s.CPU, s.Temp, s.RAM, s.GPU, s.Power}
 }
 
 type Media struct {

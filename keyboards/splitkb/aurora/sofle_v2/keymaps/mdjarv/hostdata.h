@@ -7,8 +7,7 @@
 #include <stdint.h>
 
 enum host_msg {
-    // [1] cpu %  [2] temp C  [3] ram %  [4] gpu %  [5] power W
-    // [6..21] 32 thread loads 0..15, two per byte, low nibble first
+    // [1] cpu %  [2] temp C  [3] ram %  [4] gpu %  [5] power W, once a second
     HOST_SYS = 0x01,
     // [1] flags (bit 0 playing)  [2..3] position s  [4..5] length s
     // [6] volume % (255 unknown)  [7] muted
@@ -26,12 +25,14 @@ enum host_msg {
     HOST_AGENTS = 0x06,
 };
 
+enum host_metric { METRIC_CPU, METRIC_GPU, METRIC_RAM, METRIC_TEMP, METRIC_POWER };
+
 enum agent_state { AGENT_IDLE, AGENT_WORKING, AGENT_WAITING, AGENT_DONE };
 
 #define HOST_TEXT_MAX 64
 #define HOST_ART_SIZE 128
 #define HOST_BANDS 10
-#define HOST_THREADS 32
+#define HOST_HISTORY 32 // SYS samples kept for the graphs, one per pixel column
 #define HOST_AGENT_ROWS 8
 
 typedef struct {
@@ -43,8 +44,10 @@ typedef struct {
     uint32_t last_any; // timer_read32() of the newest report of any type
     uint32_t last_sys, last_media, last_spectrum, last_agents;
 
+    // Newest SYS sample, and the last HOST_HISTORY of each, oldest first.
     uint8_t cpu, temp, ram, gpu, power;
-    uint8_t threads[HOST_THREADS]; // 0..15
+    uint8_t history[5][HOST_HISTORY]; // indexed by host_metric
+    uint8_t history_len;
 
     bool     playing, muted;
     uint16_t position, length;

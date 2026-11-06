@@ -281,7 +281,7 @@ func dryRun(ctx context.Context, st *state, spectrum <-chan [bandCount]uint8) {
 					art++
 				}
 			}
-			log.Printf("cpu %d%% threads %v temp %dC ram %d%% gpu %d%% %dW", s.CPU, s.Threads, s.Temp, s.RAM, s.GPU, s.Power)
+			log.Printf("cpu %d%% temp %dC ram %d%% gpu %d%% %dW", s.CPU, s.Temp, s.RAM, s.GPU, s.Power)
 			log.Printf("media playing=%v %d/%ds vol %d muted=%v %q / %q art %d px lit, bands %v",
 				m.Playing, m.Position, m.Length, m.Volume, m.Muted, m.Title, m.Artist, art, bands)
 			if has {
