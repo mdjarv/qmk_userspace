@@ -478,7 +478,8 @@ function children(a, mobs, t, dt, st) {
     if (k.state === 'waiting') { c.tx = Math.min(waitAt, 27); c.ty = 116; waitAt += 6; }
     else if (p && p.bed !== undefined && k.state !== 'idle') {
       const j = slotOf.get(k.family) || 0; slotOf.set(k.family, j + 1);
-      c.tx = Math.min(14 + j * 5, 27); c.ty = BEDS[p.bed] + 11; // on the path, under its plant
+      // on the path under the plants, four to a line, two lines
+      c.tx = 12 + (j % 4) * 5; c.ty = BEDS[p.bed] + 11 + Math.min(Math.floor(j / 4), 1) * 6;
     } else if (p) {
       const j = idleOf.get(k.family) || 0; idleOf.set(k.family, j + 1);
       c.tx = Math.min(Math.round(p.tx) + 9 + j * 5, 27); c.ty = p.ty + 3;
