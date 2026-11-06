@@ -1,10 +1,12 @@
-// kbscreen feeds the Sofle's left OLED over Raw HID: system load, what is
-// playing, and Agentique sessions. The keyboard decides what to show.
+// kbscreen draws the Sofle's left OLED and sends it over Raw HID: system
+// load, what is playing, and Agentique sessions. The screens are JavaScript in
+// js/; with -scripts they reload on save.
 package main
 
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -17,17 +19,18 @@ import (
 const (
 	vendorID  = 0x8D1D
 	productID = 0xEC32
+	frameRate = 50 * time.Millisecond // the OLED redraws every 50 ms anyway
 )
 
-// state is what the sources have learned; the sender turns it into reports.
+// state is what the sources have learned; the render loop draws it.
 type state struct {
-	mu        sync.Mutex
-	sys       Sys
-	media     Media
-	agents    Agents
-	hasAgents bool
-	artURL    string        // the track whose art media.Art is, or is waiting for
-	changed   chan struct{} // media text or art changed: send now
+	mu               sync.Mutex
+	sys              Sys
+	cpuHist, gpuHist []uint8
+	media            Media
+	agents           Agents
+	hasAgents        bool
+	artURL           string // the track whose art media.Art is, or is waiting for
 }
 
 func (s *state) update(f func(*state)) {
@@ -36,52 +39,179 @@ func (s *state) update(f func(*state)) {
 	s.mu.Unlock()
 }
 
-func (s *state) poke() {
-	select {
-	case s.changed <- struct{}{}:
-	default:
+func (s *state) data(now time.Time) jsData {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var a *Agents
+	if s.hasAgents {
+		a = &s.agents
 	}
+	return toJS(s.sys, s.cpuHist, s.gpuHist, s.media, a, now)
 }
 
 func main() {
 	home, _ := os.UserHomeDir()
 	config := flag.String("config", filepath.Join(home, ".config/kbscreen/config.toml"),
 		"config file: [agentique] url and token (see README)")
-	dry := flag.Bool("dry", false, "print what would be sent once a second instead of sending it")
+	scripts := flag.String("scripts", "", "directory with lib.js and screens.js, reloaded on save (default: the built-in ones)")
+	preview := flag.String("preview", "", "serve a live preview of the screen on this address, e.g. localhost:8077")
+	dry := flag.Bool("dry", false, "do not look for the keyboard; log the data once a second")
 	flag.Parse()
 	log.SetFlags(0)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	st := &state{media: Media{Volume: 255}, changed: make(chan struct{}, 1)}
-	spectrum := make(chan [bandCount]uint8, 1)
+	rend, err := newRenderer(*scripts)
+	if err != nil {
+		log.Fatalf("scripts: %v", err)
+	}
+	var pv *previewServer
+	if *preview != "" {
+		if pv, err = startPreview(ctx, *preview); err != nil {
+			log.Fatalf("preview: %v", err)
+		}
+		log.Printf("preview on http://%s", *preview)
+	}
 
+	st := &state{media: Media{Volume: 255}}
+	spectrum := make(chan [bandCount]uint8, 1)
 	go pollSys(ctx, st)
 	go watchMedia(ctx, st, spectrum)
 	if c := agentiqueFromConfig(*config, filepath.Join(home, ".config/agentique")); c != nil {
 		go pollAgents(ctx, st, c)
 	}
-
 	if *dry {
-		dryRun(ctx, st, spectrum)
-		return
+		go logData(ctx, st)
 	}
-	for ctx.Err() == nil {
-		path, err := findRawHID("/sys", vendorID, productID)
-		if err == nil {
-			var dev *device
-			if dev, err = openDevice(path); err == nil {
-				log.Printf("sending to %s", path)
-				err = serve(ctx, dev, st, spectrum)
-				dev.close()
+	run(ctx, st, rend, pv, !*dry, spectrum)
+}
+
+// run draws a frame every frameRate and sends what changed to the keyboard,
+// reconnecting when it goes away. Knob presses go to the scripts.
+func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useDevice bool, spectrum <-chan [bandCount]uint8) {
+	start := time.Now()
+	tick := time.NewTicker(frameRate)
+	defer tick.Stop()
+	var (
+		dev       *device
+		events    <-chan byte
+		sender    frameSender
+		nextOpen  time.Time
+		lastCheck time.Time
+		say       = dedupLog()
+	)
+	defer func() {
+		if dev != nil {
+			dev.close()
+		}
+	}()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case b := <-spectrum:
+			st.update(func(st *state) { st.media.Bands, st.media.BandsAt = b, time.Now() })
+			continue
+		case ev, ok := <-events:
+			if !ok {
+				events = nil
+				continue
+			}
+			if ev == eventKnob {
+				if err := rend.pressKnob(); err != nil {
+					say("knob: %v", err)
+				}
+			}
+			continue
+		case <-tick.C:
+		}
+		now := time.Now()
+
+		if rend.dir != "" && now.Sub(lastCheck) >= 500*time.Millisecond {
+			lastCheck = now
+			if rend.changed() {
+				if err := rend.load(); err != nil {
+					say("scripts: %v (keeping the last good version)", err)
+					pv.setError(err)
+				} else {
+					log.Printf("scripts reloaded")
+					pv.setError(nil)
+				}
 			}
 		}
-		if err != nil && ctx.Err() == nil {
-			log.Printf("keyboard: %v; retrying", err)
+
+		frame, err := rend.frame(st.data(now), now.Sub(start).Milliseconds())
+		if err != nil {
+			say("render: %v", err)
+			pv.setError(err)
+			continue
 		}
-		sleep(ctx, 2*time.Second)
+		pv.setFrame(frame)
+
+		if !useDevice {
+			continue
+		}
+		if dev == nil && !now.Before(nextOpen) {
+			path, err := findRawHID("/sys", vendorID, productID)
+			if err == nil {
+				dev, err = openDevice(path)
+			}
+			if err != nil {
+				say("keyboard: %v; retrying", err)
+				nextOpen = now.Add(2 * time.Second)
+				continue
+			}
+			log.Printf("sending to %s", path)
+			events = dev.events()
+			sender.reset()
+		}
+		if dev == nil {
+			continue
+		}
+		for _, r := range sender.reports(frame, now) {
+			if err := dev.send(r); err != nil {
+				say("keyboard: %v; reconnecting", err)
+				dev.close()
+				dev, events = nil, nil
+				nextOpen = now.Add(2 * time.Second)
+				break
+			}
+		}
 	}
+}
+
+// dedupLog logs a message only when it differs from the previous one.
+func dedupLog() func(format string, args ...any) {
+	var last string
+	return func(format string, args ...any) {
+		msg := fmt.Sprintf(format, args...)
+		if msg != last {
+			log.Print(msg)
+			last = msg
+		}
+	}
+}
+
+func pollSys(ctx context.Context, st *state) {
+	r := newSysReader("/")
+	for ctx.Err() == nil {
+		s := r.read()
+		st.update(func(st *state) {
+			st.sys = s
+			st.cpuHist = appendHistory(st.cpuHist, s.CPU)
+			st.gpuHist = appendHistory(st.gpuHist, s.GPU)
+		})
+		sleep(ctx, time.Second)
+	}
+}
+
+func appendHistory(h []uint8, v uint8) []uint8 {
+	h = append(h, v)
+	if len(h) > historyN {
+		h = h[len(h)-historyN:]
+	}
+	return h
 }
 
 // agentiqueFromConfig makes the Agentique client from kbscreen's config file:
@@ -113,74 +243,6 @@ func agentiqueFromConfig(path, localDir string) *agentiqueClient {
 	return c
 }
 
-// serve sends reports until a write fails. Everything is resent
-// periodically, so a keyboard that was replugged or reflashed catches up.
-func serve(ctx context.Context, dev *device, st *state, spectrum <-chan [bandCount]uint8) error {
-	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
-	sendAll := func(reports ...report) error {
-		for _, r := range reports {
-			if err := dev.send(r); err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-	snapshot := func() (Sys, Media, Agents, bool) {
-		st.mu.Lock()
-		defer st.mu.Unlock()
-		return st.sys, st.media, st.agents, st.hasAgents
-	}
-	full := func() error {
-		_, m, _, _ := snapshot()
-		reports := append(textReports(textTitle, m.Title), textReports(textArtist, m.Artist)...)
-		reports = append(reports, artReports(m.Art)...)
-		return sendAll(append(reports, m.report())...)
-	}
-	if err := full(); err != nil {
-		return err
-	}
-	for n := 1; ; n++ {
-		select {
-		case <-ctx.Done():
-			return nil
-		case b := <-spectrum:
-			if err := dev.send(spectrumReport(b)); err != nil {
-				return err
-			}
-		case <-st.changed:
-			if err := full(); err != nil {
-				return err
-			}
-		case <-tick.C:
-			s, m, a, hasAgents := snapshot()
-			reports := []report{s.report(), m.report()}
-			if hasAgents {
-				reports = append(reports, a.reports()...)
-			}
-			if err := sendAll(reports...); err != nil {
-				return err
-			}
-			if n%5 == 0 {
-				if err := full(); err != nil {
-					return err
-				}
-			}
-		}
-	}
-}
-
-func pollSys(ctx context.Context, st *state) {
-	r := newSysReader("/")
-	for ctx.Err() == nil {
-		s := r.read()
-		now := time.Now()
-		s.Hour, s.Minute = uint8(now.Hour()), uint8(now.Minute())
-		st.update(func(st *state) { st.sys = s })
-		sleep(ctx, time.Second)
-	}
-}
-
 func pollAgents(ctx context.Context, st *state, c *agentiqueClient) {
 	var lastErr string
 	for ctx.Err() == nil {
@@ -204,7 +266,12 @@ func watchMedia(ctx context.Context, st *state, spectrum chan<- [bandCount]uint8
 	tracks := make(chan trackInfo, 4)
 	go followPlayer(ctx, func(t trackInfo) { tracks <- t })
 	go followVolume(ctx, func(v uint8, muted bool) {
-		st.update(func(st *state) { st.media.Volume, st.media.Muted = v, muted })
+		st.update(func(st *state) {
+			if st.media.Volume != 255 && (v != st.media.Volume || muted != st.media.Muted) {
+				st.media.VolumeChanged = time.Now()
+			}
+			st.media.Volume, st.media.Muted = v, muted
+		})
 	})
 
 	var cur trackInfo
@@ -241,7 +308,6 @@ func watchMedia(ctx context.Context, st *state, spectrum chan<- [bandCount]uint8
 							st.media.Art = art
 						}
 					})
-					st.poke()
 				}(t.artURL)
 			}
 			if t.playing && stopSpectrum == nil {
@@ -252,7 +318,6 @@ func watchMedia(ctx context.Context, st *state, spectrum chan<- [bandCount]uint8
 				stopSpectrum()
 				stopSpectrum = nil
 			}
-			st.poke()
 		case <-pos.C:
 			if cur.playing {
 				if p, ok := playerPosition(ctx); ok {
@@ -263,34 +328,17 @@ func watchMedia(ctx context.Context, st *state, spectrum chan<- [bandCount]uint8
 	}
 }
 
-func dryRun(ctx context.Context, st *state, spectrum <-chan [bandCount]uint8) {
-	var bands [bandCount]uint8
-	tick := time.NewTicker(time.Second)
-	defer tick.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case bands = <-spectrum:
-		case <-st.changed:
-		case <-tick.C:
-			st.mu.Lock()
-			s, m, a, has := st.sys, st.media, st.agents, st.hasAgents
-			st.mu.Unlock()
-			art := 0
-			for _, b := range m.Art {
-				for ; b != 0; b &= b - 1 {
-					art++
-				}
-			}
-			log.Printf("cpu %d%% gpu %d%% ram %.1f/%.0fG vram %.1f/%.0fG battery %d%% state %d time %02d:%02d",
-				s.CPU, s.GPU, s.RAMUsed, s.RAMTotal, s.VRAMUsed, s.VRAMTotal, s.Battery, s.BatteryState, s.Hour, s.Minute)
-			log.Printf("media playing=%v %d/%ds vol %d muted=%v %q / %q art %d px lit, bands %v",
-				m.Playing, m.Position, m.Length, m.Volume, m.Muted, m.Title, m.Artist, art, bands)
-			if has {
-				log.Printf("agents run %d wait %d, later wait %d (oldest %s) idle %d, new question %v, rows %v",
-					a.Running, a.Waiting, a.LaterWaiting, a.OldestWait.Round(time.Minute), a.LaterIdle, a.NewQuestion, a.Rows)
-			}
+func logData(ctx context.Context, st *state) {
+	for ctx.Err() == nil {
+		sleep(ctx, time.Second)
+		d := st.data(time.Now())
+		s, m := d.Sys, d.Media
+		log.Printf("cpu %d%% gpu %d%% ram %.1f/%.0fG vram %.1f/%.0fG battery %d%% %s %s",
+			s.CPU, s.GPU, s.RAMUsed, s.RAMTotal, s.VRAMUsed, s.VRAMTotal, s.Battery, s.BatteryState, s.Clock)
+		log.Printf("media playing=%v %d/%ds vol %d muted=%v %q / %q bands %v", m.Playing, m.Position, m.Length, m.Volume, m.Muted, m.Title, m.Artist, m.Bands)
+		if a := d.Agents; a != nil {
+			log.Printf("agents run %d wait %d, later wait %d (oldest %s) idle %d, new question %v, rows %v",
+				a.Running, a.Waiting, a.LaterWaiting, a.OldestWait, a.LaterIdle, a.NewQuestion, a.Rows)
 		}
 	}
 }

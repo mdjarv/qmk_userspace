@@ -3,7 +3,8 @@ Description=Feed the Sofle's left OLED (kbscreen)
 After=pipewire-pulse.service
 
 [Service]
-ExecStart=%h/.local/bin/kbscreen
+# make screen-install fills in the repo's script directory and the preview address
+ExecStart=%h/.local/bin/kbscreen -scripts @SCRIPTS@ -preview @PREVIEW@
 Restart=on-failure
 RestartSec=5
 

@@ -47,15 +47,21 @@ build:
 KBSCREEN_DIR := $(QMK_USERSPACE)/tools/kbscreen
 KBSCREEN := $(KBSCREEN_DIR)/kbscreen
 
-$(KBSCREEN): $(wildcard $(KBSCREEN_DIR)/*.go) $(KBSCREEN_DIR)/go.mod
+PREVIEW ?= localhost:8077
+
+$(KBSCREEN): $(wildcard $(KBSCREEN_DIR)/*.go) $(wildcard $(KBSCREEN_DIR)/js/*.js) $(KBSCREEN_DIR)/go.mod
 	cd $(KBSCREEN_DIR) && go build -o kbscreen .
 
+# Runs in the foreground with the repo's scripts (reloaded on save) and the
+# preview; stop the service first: systemctl --user stop kbscreen
 screen: $(KBSCREEN)
-	$(KBSCREEN) $(if $(DRY),-dry)
+	$(KBSCREEN) -scripts $(KBSCREEN_DIR)/js -preview $(PREVIEW) $(if $(DRY),-dry)
 
+# The service also runs the repo's scripts, so edits show up without this.
 screen-install: $(KBSCREEN)
 	install -D -m755 $(KBSCREEN) $(HOME)/.local/bin/kbscreen
-	install -D -m644 $(KBSCREEN_DIR)/kbscreen.service $(HOME)/.config/systemd/user/kbscreen.service
+	sed -e 's|@SCRIPTS@|$(KBSCREEN_DIR)/js|' -e 's|@PREVIEW@|$(PREVIEW)|' $(KBSCREEN_DIR)/kbscreen.service \
+		| install -D -m644 /dev/stdin $(HOME)/.config/systemd/user/kbscreen.service
 	systemctl --user daemon-reload
 	systemctl --user enable kbscreen.service
 	systemctl --user restart kbscreen.service

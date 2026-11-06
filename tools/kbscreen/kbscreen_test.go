@@ -41,25 +41,6 @@ func TestFindRawHIDPicksRawInterface(t *testing.T) {
 	}
 }
 
-func TestTextReportsChunkAndClear(t *testing.T) {
-	long := ""
-	for len(long) < 70 {
-		long += "abcdefghij"
-	}
-	rs := textReports(textTitle, long)
-	if len(rs) != 3 || rs[2][2] != textMax || rs[2][3] != 56 || rs[1][4] != long[28] {
-		t.Fatalf("long title reports: %d, last % x", len(rs), rs[len(rs)-1])
-	}
-	// an empty title must still reach the keyboard, or the old one stays up
-	rs = textReports(textArtist, "")
-	if len(rs) != 1 || rs[0][1] != textArtist || rs[0][2] != 0 {
-		t.Fatalf("empty artist reports: % x", rs)
-	}
-	if got := asciiOnly("Björk – Jóga ♪"); got != "Bjork - Joga ?" {
-		t.Fatalf("asciiOnly = %q", got)
-	}
-}
-
 type needsYou = struct {
 	UnseenCompletedAt string `json:"unseenCompletedAt"`
 	ApprovalTool      string `json:"approvalTool"`
@@ -68,7 +49,7 @@ type needsYou = struct {
 	WaitingSince      string `json:"waitingSince"`
 }
 
-func TestAgentsNowLaterAndReports(t *testing.T) {
+func TestAgentsNowAndLater(t *testing.T) {
 	now := time.Date(2026, 11, 6, 13, 0, 0, 0, time.UTC)
 	unseen := &needsYou{UnseenCompletedAt: "2026-11-06T09:00:00Z"}
 	sessions := []readSession{
@@ -96,16 +77,8 @@ func TestAgentsNowLaterAndReports(t *testing.T) {
 		}
 	}
 
-	rs := a.reports()
-	if len(rs) != 2 || rs[0][1] != 4 || rs[1][2] != 3 || rs[1][3] != 1 || rs[0][8] != 84+3 || rs[0][9] != 1 ||
-		string(rs[0][10:15]) != "PINT " || rs[0][15] != agentWorking {
-		t.Fatalf("agent reports: % x", rs)
-	}
-	if rs := (Agents{}).reports(); len(rs) != 1 || rs[0][1] != 0 {
-		t.Fatalf("no sessions must still send one report: % x", rs)
-	}
-	if ageCode(5*time.Minute) != 5 || ageCode(3*time.Hour) != 63 {
-		t.Fatal("ageCode")
+	if ageText(5*time.Minute) != "5M" || ageText(3*time.Hour) != "3H" || ageText(72*time.Hour) != "3D" {
+		t.Fatal("ageText")
 	}
 }
 
@@ -169,33 +142,6 @@ func TestSpectrumPutsToneInItsBand(t *testing.T) {
 	}
 }
 
-// serve frames each report for hidraw (a leading report number 0) and opens
-// with the full media state so a fresh keyboard catches up.
-func TestServeFramesReportsForHidraw(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "hidraw")
-	write(t, path, nil)
-	dev, err := openDevice(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	st := &state{media: Media{Title: "Song", Volume: 40}, changed: make(chan struct{}, 1)}
-	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
-	defer cancel()
-	if err := serve(ctx, dev, st, nil); err != nil {
-		t.Fatal(err)
-	}
-	dev.close()
-	data, _ := os.ReadFile(path)
-	// title, artist, 5 art chunks, media
-	if len(data) != 8*(reportSize+1) || data[0] != 0 || data[1] != msgText || string(data[5:9]) != "Song" {
-		t.Fatalf("wrote %d bytes: % x", len(data), data[:min(len(data), 40)])
-	}
-	last := data[7*(reportSize+1):]
-	if last[1] != msgMedia || last[7] != 40 {
-		t.Fatalf("last report % x", last)
-	}
-}
-
 // A server on another host, from the config file: its URL is used as given
 // and the token goes in the Authorization header.
 func TestRemoteAgentiqueClient(t *testing.T) {
@@ -230,8 +176,8 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 }
 
 // VRAM counts what spilled into GTT; the battery only shows while it charges
-// or discharges; GiB go to the keyboard in tenths.
-func TestSysMemoryBatteryReport(t *testing.T) {
+// or discharges.
+func TestSysMemoryAndBattery(t *testing.T) {
 	root := t.TempDir()
 	write(t, root+"/proc/meminfo", []byte("MemTotal:       32505856 kB\nMemAvailable:   13238272 kB\n"))
 	dev := root + "/sys/class/drm/card1/device/"
@@ -242,12 +188,9 @@ func TestSysMemoryBatteryReport(t *testing.T) {
 	write(t, root+"/sys/class/power_supply/BAT0/status", []byte("Charging\n"))
 
 	s := newSysReader(root).read()
-	s.Hour, s.Minute = 14, 53
-	r := s.report()
-	ram := int(r[3]) | int(r[4])<<8
-	vram := int(r[6]) | int(r[7])<<8
-	if ram != 184 || r[5] != 31 || vram != 220 || r[8] != 32 || r[9] != 76 || r[10] != batteryCharging || r[11] != 14 || r[12] != 53 {
-		t.Fatalf("report % x (ram %d vram %d)", r[:13], ram, vram)
+	if math.Abs(s.RAMUsed-18.4) > 0.05 || math.Round(s.RAMTotal) != 31 || s.VRAMUsed != 22 || s.VRAMTotal != 32 ||
+		s.Battery != 76 || s.BatteryState != batteryCharging {
+		t.Fatalf("sys = %+v", s)
 	}
 	for status, want := range map[string]uint8{"Discharging": batteryDischarging, "Full": batteryHidden, "Not charging": batteryHidden} {
 		write(t, root+"/sys/class/power_supply/BAT0/status", []byte(status+"\n"))

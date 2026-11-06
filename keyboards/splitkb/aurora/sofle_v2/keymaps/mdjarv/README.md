@@ -7,8 +7,8 @@
 | `keymap.json` | Layers, encoders, the Liatris converter and every standard setting (features, tap-hold, debounce, split sync). Layers are numbered here; `layers.h` names them for C. Run `make draw` after changing it to redraw `keymap.svg`. |
 | `keymap.c` | Behaviour: hold-to-toggle game mode, next OLED screen, Liatris LED off |
 | `oled.c`, `gfx/` | OLED entry point and the animations |
-| `screens.c`, `fb.c` | Left OLED screens, drawn into a framebuffer |
-| `hostdata.c`, `hostdata.h` | Raw HID reports from `tools/kbscreen` and their byte layout |
+| `screens.c` | Left OLED: shows the frames `tools/kbscreen` draws, or the cat |
+| `hostdata.c`, `hostdata.h` | The frame protocol over Raw HID |
 | `config.h`, `rules.mk` | Only what `keymap.json` cannot express |
 
 Behaviour worth knowing:
@@ -17,7 +17,7 @@ Behaviour worth knowing:
 - **Esc / Right Shift** is one mod-tap key. Permissive hold makes pressing and releasing another key while it is down count as Shift.
 - **Knobs**: left is volume, right is scroll; both do nothing on Lower. Pressing the right knob shows the next left-OLED screen.
 - **Debounce** is `asym_eager_defer_pk` at 10 ms: presses register at once, releases wait 10 ms of stable contact, which swallows switch chatter.
-- **Left OLED** shows what `tools/kbscreen` sends from the computer. Music playing shows the music screen, otherwise perf: the battery (only while charging or discharging) and the clock, then the last 32 s of CPU load beside a RAM tank and of GPU load beside a VRAM tank. A knob press shows the next screen until that choice changes; the agent board (a robot per session updated in the last hour, older ones counted under LATER) is only reached that way. A session that started asking in the last 10 minutes puts the asking robot in the top right corner of the other screens. A volume change shows a volume readout over any screen for 1.5 s. Without data for 3 s the cat comes back.
+- **Left OLED** is drawn by `tools/kbscreen` on the computer (perf, music, agents; the screens are JavaScript in `tools/kbscreen/js`, editable live). The keyboard shows its frames, or the cat when it sends nothing for 3 s. Pressing the right knob goes to kbscreen, which shows the next screen.
 - **Right OLED** is the top half of the headphones animation (the amazed face in game mode) over the layer icon and the Gui/Alt/Ctrl/Shift tiles.
 - **OLEDs** blank after 60 s without input. RGB is off.
 

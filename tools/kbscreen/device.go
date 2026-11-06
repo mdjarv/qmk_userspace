@@ -34,7 +34,7 @@ func findRawHID(sysRoot string, vid, pid uint16) (string, error) {
 type device struct{ f *os.File }
 
 func openDevice(path string) (*device, error) {
-	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	f, err := os.OpenFile(path, os.O_RDWR, 0)
 	if err != nil {
 		return nil, err
 	}
@@ -48,6 +48,28 @@ func (d *device) send(r report) error {
 	copy(buf[1:], r[:])
 	_, err := d.f.Write(buf[:])
 	return err
+}
+
+// events delivers the keyboard's event reports until the device closes.
+func (d *device) events() <-chan byte {
+	ch := make(chan byte, 4)
+	go func() {
+		defer close(ch)
+		var buf [reportSize]byte
+		for {
+			n, err := d.f.Read(buf[:])
+			if err != nil {
+				return
+			}
+			if n >= 2 && buf[0] == msgEvent {
+				select {
+				case ch <- buf[1]:
+				default:
+				}
+			}
+		}
+	}()
+	return ch
 }
 
 func (d *device) close() { d.f.Close() }
