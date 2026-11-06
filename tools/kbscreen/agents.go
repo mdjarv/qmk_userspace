@@ -1,0 +1,205 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/json"
+	"encoding/pem"
+	"errors"
+	"fmt"
+	"net/http"
+	"os"
+	"regexp"
+	"sort"
+	"strings"
+	"time"
+)
+
+// Agentique sessions from its read-only API (/api/read/*), which takes a
+// read-scoped token: agentique tokens add --perm read.
+
+type agentiqueClient struct {
+	base  string // https://127.0.0.1:19201
+	token string
+	http  *http.Client
+	names map[string]string // project id -> name
+}
+
+type readSession struct {
+	ProjectID string `json:"projectId"`
+	Name      string `json:"name"`
+	State     string `json:"state"`
+	UpdatedAt string `json:"updatedAt"`
+	NeedsYou  *struct {
+		UnseenCompletedAt string `json:"unseenCompletedAt"`
+		ApprovalTool      string `json:"approvalTool"`
+		Question          bool   `json:"question"`
+		SurfacesWaiting   int    `json:"surfacesWaiting"`
+		WaitingSince      string `json:"waitingSince"`
+	} `json:"needsYou"`
+}
+
+// newAgentiqueClient reads the server address from Agentique's config.toml
+// and trusts only the certificate at its tls-cert path.
+func newAgentiqueClient(configDir, token string) (*agentiqueClient, error) {
+	cfg, err := os.ReadFile(configDir + "/config.toml")
+	if err != nil {
+		return nil, err
+	}
+	addr := tomlString(cfg, "addr")
+	if addr == "" {
+		return nil, errors.New("agentique: no addr in config.toml")
+	}
+	port := addr[strings.LastIndex(addr, ":")+1:]
+	certPath := tomlString(cfg, "tls-cert")
+	if certPath == "" {
+		return &agentiqueClient{base: "http://127.0.0.1:" + port, token: token, http: http.DefaultClient}, nil
+	}
+	if !strings.HasPrefix(certPath, "/") {
+		certPath = configDir + "/" + certPath
+	}
+	pemBytes, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(pemBytes)
+	if block == nil {
+		return nil, errors.New("agentique: no certificate in " + certPath)
+	}
+	// The certificate names the tailnet host, not 127.0.0.1, so match the
+	// exact certificate instead of verifying names.
+	tlsCfg := &tls.Config{
+		InsecureSkipVerify: true,
+		VerifyPeerCertificate: func(raw [][]byte, _ [][]*x509.Certificate) error {
+			if len(raw) == 0 || !bytes.Equal(raw[0], block.Bytes) {
+				return errors.New("agentique: server certificate does not match " + certPath)
+			}
+			return nil
+		},
+	}
+	return &agentiqueClient{
+		base:  "https://127.0.0.1:" + port,
+		token: token,
+		http:  &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{TLSClientConfig: tlsCfg}},
+	}, nil
+}
+
+var tomlLine = regexp.MustCompile(`(?m)^\s*([\w-]+)\s*=\s*"([^"]*)"`)
+
+func tomlString(cfg []byte, key string) string {
+	for _, m := range tomlLine.FindAllSubmatch(cfg, -1) {
+		if string(m[1]) == key {
+			return string(m[2])
+		}
+	}
+	return ""
+}
+
+func (c *agentiqueClient) get(ctx context.Context, path string, v any) error {
+	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("agentique: GET %s: %s", path, resp.Status)
+	}
+	return json.NewDecoder(resp.Body).Decode(v)
+}
+
+func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
+	var s struct {
+		Sessions []readSession `json:"sessions"`
+	}
+	if err := c.get(ctx, "/api/read/sessions", &s); err != nil {
+		return Agents{}, err
+	}
+	for _, sess := range s.Sessions {
+		if _, ok := c.names[sess.ProjectID]; !ok {
+			c.loadProjects(ctx)
+			break
+		}
+	}
+	return summarize(s.Sessions, c.names), nil
+}
+
+func (c *agentiqueClient) loadProjects(ctx context.Context) {
+	var p struct {
+		Projects []struct {
+			ID   string `json:"id"`
+			Name string `json:"name"`
+		} `json:"projects"`
+	}
+	if c.get(ctx, "/api/read/projects", &p) != nil {
+		return
+	}
+	c.names = map[string]string{}
+	for _, pr := range p.Projects {
+		c.names[pr.ID] = pr.Name
+	}
+}
+
+// summarize orders sessions waiting on you first, then working, then finished
+// and unseen, then idle (most recent first), and counts them. Stopped and
+// failed sessions are left out.
+func summarize(sessions []readSession, names map[string]string) Agents {
+	var a Agents
+	type ranked struct {
+		row     AgentRow
+		updated string
+	}
+	var rows []ranked
+	for _, s := range sessions {
+		var st uint8
+		switch {
+		case s.NeedsYou != nil && (s.NeedsYou.ApprovalTool != "" || s.NeedsYou.Question || s.NeedsYou.SurfacesWaiting > 0 || s.NeedsYou.WaitingSince != ""):
+			st = agentWaiting
+			a.Waiting++
+		case s.State == "running" || s.State == "merging":
+			st = agentWorking
+			a.Running++
+		case s.NeedsYou != nil && s.NeedsYou.UnseenCompletedAt != "":
+			st = agentDone
+		case s.State == "idle" || s.State == "done":
+			st = agentIdle
+			a.Idle++
+		default:
+			continue
+		}
+		label := names[s.ProjectID]
+		if label == "" {
+			label = s.Name
+		}
+		rows = append(rows, ranked{AgentRow{shortName(label), st}, s.UpdatedAt})
+	}
+	order := map[uint8]int{agentWaiting: 0, agentWorking: 1, agentDone: 2, agentIdle: 3}
+	sort.SliceStable(rows, func(i, j int) bool {
+		if oi, oj := order[rows[i].row.State], order[rows[j].row.State]; oi != oj {
+			return oi < oj
+		}
+		return rows[i].updated > rows[j].updated
+	})
+	for _, r := range rows {
+		a.Rows = append(a.Rows, r.row)
+	}
+	return a
+}
+
+var nonAlnum = regexp.MustCompile(`[^A-Za-z0-9]+`)
+
+// shortName makes a 5-character label: "QMK Userspace" -> "QMK",
+// "The Pint" -> "PINT", "terminal-drift" -> "TERMI".
+func shortName(s string) string {
+	for _, w := range nonAlnum.Split(asciiOnly(s), -1) {
+		if w == "" || strings.EqualFold(w, "the") {
+			continue
+		}
+		w = strings.ToUpper(w)
+		return w[:min(5, len(w))]
+	}
+	return "?"
+}

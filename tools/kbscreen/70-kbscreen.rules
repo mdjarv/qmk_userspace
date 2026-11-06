@@ -1,0 +1,2 @@
+# Lets the logged-in user write to the Sofle's Raw HID interface (kbscreen).
+KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="8d1d", ATTRS{idProduct}=="ec32", TAG+="uaccess"

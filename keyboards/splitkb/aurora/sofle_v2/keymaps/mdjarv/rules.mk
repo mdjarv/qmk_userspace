@@ -1,2 +1,2 @@
 # Everything else is in keymap.json
-SRC += oled.c
+SRC += oled.c fb.c screens.c hostdata.c

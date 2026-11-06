@@ -1,0 +1,11 @@
+[Unit]
+Description=Feed the Sofle's left OLED (kbscreen)
+After=pipewire-pulse.service
+
+[Service]
+ExecStart=%h/.local/bin/kbscreen
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

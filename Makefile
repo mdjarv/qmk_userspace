@@ -25,7 +25,7 @@ KBFLASH := $(KBFLASH_DIR)/kbflash
 FIRMWARE := $(QMK_USERSPACE)/$(subst /,_,$(KB))_$(KM).uf2
 export KBFLASH_CONFIG := $(QMK_USERSPACE)/kbflash.json
 
-.PHONY: backup restore drill build flash draw
+.PHONY: backup restore drill build flash draw screen screen-install
 
 $(KBFLASH): $(wildcard $(KBFLASH_DIR)/*.go) $(KBFLASH_DIR)/go.mod
 	cd $(KBFLASH_DIR) && go build -o kbflash .
@@ -42,6 +42,24 @@ drill: $(KBFLASH)
 
 build:
 	$(QMK_BIN) compile -kb $(KB) -km $(KM)
+
+# Host data for the left OLED, see tools/kbscreen
+KBSCREEN_DIR := $(QMK_USERSPACE)/tools/kbscreen
+KBSCREEN := $(KBSCREEN_DIR)/kbscreen
+
+$(KBSCREEN): $(wildcard $(KBSCREEN_DIR)/*.go) $(KBSCREEN_DIR)/go.mod
+	cd $(KBSCREEN_DIR) && go build -o kbscreen .
+
+screen: $(KBSCREEN)
+	$(KBSCREEN) $(if $(DRY),-dry)
+
+screen-install: $(KBSCREEN)
+	install -D -m755 $(KBSCREEN) $(HOME)/.local/bin/kbscreen
+	install -D -m644 $(KBSCREEN_DIR)/kbscreen.service $(HOME)/.config/systemd/user/kbscreen.service
+	systemctl --user daemon-reload
+	systemctl --user enable kbscreen.service
+	systemctl --user restart kbscreen.service
+	test -e /etc/udev/rules.d/70-kbscreen.rules || echo "keyboard access: sudo install -m644 $(KBSCREEN_DIR)/70-kbscreen.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
 
 flash: $(KBFLASH)
 	$(KBFLASH) flash "$(FIRMWARE)" --build "$(QMK_BIN) compile -kb $(KB) -km $(KM)" $(if $(ERASE),--erase)

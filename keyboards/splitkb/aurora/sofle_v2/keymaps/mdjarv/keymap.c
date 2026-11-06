@@ -1,7 +1,8 @@
 // Behaviour for the layout in keymap.json, which the build compiles together
-// with this file (GAME_TOGGLE is declared there).
+// with this file (GAME_TOGGLE and SCREEN_NEXT are declared there).
 #include QMK_KEYBOARD_H
 #include "layers.h"
+#include "screens.h"
 
 // Game mode is the default layer _GAME. Its key sits under the palm, so it
 // only toggles after being held this long.
@@ -14,6 +15,10 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
     if (keycode == GAME_TOGGLE) {
         game_toggle_held  = record->event.pressed;
         game_toggle_timer = timer_read();
+        return false;
+    }
+    if (keycode == SCREEN_NEXT) {
+        if (record->event.pressed) screens_next();
         return false;
     }
     return true;
