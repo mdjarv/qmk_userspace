@@ -18,13 +18,14 @@ bool process_record_user(uint16_t keycode, keyrecord_t *record) {
         return false;
     }
     if (keycode == SCREEN_NEXT) {
-        if (record->event.pressed) screens_next();
+        screens_knob(record->event.pressed);
         return false;
     }
     return true;
 }
 
 void housekeeping_task_user(void) {
+    if (is_keyboard_master()) screens_task();
     if (game_toggle_held && timer_elapsed(game_toggle_timer) >= GAME_TOGGLE_HOLD_MS) {
         game_toggle_held = false;
         uint8_t layer    = get_highest_layer(default_layer_state) == _GAME ? _DEFAULT : _GAME;

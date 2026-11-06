@@ -1,7 +1,8 @@
 // The left OLED's screens. kbscreen calls render(d, t) 20 times a second with
-// the latest data (README.md lists d's fields) and t in ms, and knob() when
-// the right knob is pressed. Save and the keyboard shows the change within a
-// second; a script that fails to load leaves the last good one running.
+// the latest data (README.md lists d's fields) and t in ms, and knob(kind)
+// when the right knob is pressed: "press", "double" or "long". Save and the
+// keyboard shows the change within a second; a script that fails to load
+// leaves the last good one running.
 //
 //   perf    battery and clock; CPU load beside a RAM tank, GPU load beside VRAM
 //   music   album art, scrolling title and artist, spectrum, track position
@@ -9,8 +10,10 @@
 //           counted under LATER; only reached by knob
 //
 // Music playing shows music, otherwise perf. A knob press shows the next screen
-// until that choice changes. A question asked in the last 10 minutes puts the
-// asking robot on perf (in place of the battery %) and music (top right).
+// until that choice changes, a double press the previous one, a long press
+// goes back to the automatic choice. A question asked in the last 10 minutes
+// puts the asking robot on perf (in place of the battery %) and music (top
+// right). The screens stay on while music plays, and dim at night.
 'use strict';
 
 const f = new Frame();
@@ -19,9 +22,16 @@ let shown = 'perf', override = null, overrideContext = null, lastData = null;
 
 const context = d => (d.media.playing ? 'music' : 'perf');
 
-function knob() {
-  override = SCREENS[(SCREENS.indexOf(override || shown) + 1) % SCREENS.length];
+function knob(kind) {
+  if (kind === 'long') { override = null; return; }
+  const step = kind === 'double' ? SCREENS.length - 1 : 1;
+  override = SCREENS[(SCREENS.indexOf(override || shown) + step) % SCREENS.length];
   overrideContext = lastData ? context(lastData) : null;
+}
+
+function night(d) {
+  const hour = Number(d.sys.clock.slice(0, 2));
+  return hour >= 22 || hour < 7;
 }
 
 function render(d, t) {
@@ -29,6 +39,8 @@ function render(d, t) {
   const ctx = context(d);
   if (override && ctx !== overrideContext) override = null;
   shown = override || ctx;
+  display.keepAwake = d.media.playing;
+  display.brightness = night(d) ? 40 : 255;
   f.clear();
   if (shown === 'music') music(d, t);
   else if (shown === 'agents') agents(d, t);

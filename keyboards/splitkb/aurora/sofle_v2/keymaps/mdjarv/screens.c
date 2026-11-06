@@ -7,7 +7,10 @@
 #include "screens.h"
 #include "gfx/idle_small.h"
 
-#define HOST_TIMEOUT 3000 // ms without a report before the cat takes over
+#define HOST_TIMEOUT 3000  // ms without a report before the cat takes over
+#define KNOB_LONG_MS 500    // a press held this long is a long press
+#define KNOB_DOUBLE_MS 250  // a second press this soon after the first is a double press
+#define STATE_EVERY_MS 1000 // layer and mods are resent this often, for a host that just connected
 
 static void render_cat(void) {
     static uint8_t buf[HOST_FRAME_SIZE];
@@ -30,6 +33,47 @@ void screens_render(void) {
     }
 }
 
-void screens_next(void) {
-    host_send_event(HOST_EVENT_KNOB);
+static bool     knob_down, knob_pending, knob_long_sent;
+static uint16_t knob_pressed_at, knob_released_at;
+
+void screens_knob(bool pressed) {
+    if (pressed) {
+        if (knob_pending && timer_elapsed(knob_released_at) < KNOB_DOUBLE_MS) {
+            knob_pending = false;
+            host_send_event(HOST_EVENT_KNOB_DOUBLE, 0, 0);
+            knob_long_sent = true; // this press is used up; its release sends nothing
+        } else {
+            knob_long_sent = false;
+        }
+        knob_down       = true;
+        knob_pressed_at = timer_read();
+    } else {
+        knob_down = false;
+        if (!knob_long_sent) {
+            knob_pending     = true;
+            knob_released_at = timer_read();
+        }
+    }
+}
+
+void screens_task(void) {
+    if (knob_down && !knob_long_sent && timer_elapsed(knob_pressed_at) >= KNOB_LONG_MS) {
+        knob_long_sent = true;
+        host_send_event(HOST_EVENT_KNOB_LONG, 0, 0);
+    }
+    if (knob_pending && timer_elapsed(knob_released_at) >= KNOB_DOUBLE_MS) {
+        knob_pending = false;
+        host_send_event(HOST_EVENT_KNOB, 0, 0);
+    }
+
+    static uint8_t  last_layer = 255, last_mods;
+    static uint16_t last_sent;
+    uint8_t         layer = get_highest_layer(layer_state | default_layer_state);
+    uint8_t         mods  = get_mods() | get_oneshot_mods();
+    if (layer != last_layer || mods != last_mods || timer_elapsed(last_sent) >= STATE_EVERY_MS) {
+        last_layer = layer;
+        last_mods  = mods;
+        last_sent  = timer_read();
+        host_send_event(HOST_EVENT_STATE, layer, mods);
+    }
 }

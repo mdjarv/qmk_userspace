@@ -5,6 +5,7 @@
 #include QMK_KEYBOARD_H
 #include "layers.h"
 #include "screens.h"
+#include "hostdata.h"
 #include "gfx/headphones.h"
 #include "gfx/amazed.h"
 
@@ -181,8 +182,9 @@ static void render_slave(void) {
 }
 
 // Master decides on/off from input activity; SPLIT_OLED syncs that to the slave.
+// The host can keep them on (music playing, say) with HOST_KEEP_AWAKE.
 static void update_idle_blanking(void) {
-    if (last_input_activity_elapsed() < OLED_IDLE_TIMEOUT) {
+    if (last_input_activity_elapsed() < OLED_IDLE_TIMEOUT || host_keep_awake()) {
         oled_on();
     } else {
         oled_off();

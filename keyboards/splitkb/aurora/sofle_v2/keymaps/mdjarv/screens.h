@@ -3,5 +3,8 @@
 
 // Draws the current frame. Call from oled_task_user on the USB half.
 void screens_render(void);
-// The knob press: the host decides what it means.
-void screens_next(void);
+// The right knob's switch, pressed or released: sent to the host as a single,
+// double or long press. The host decides what they mean.
+void screens_knob(bool pressed);
+// Call often on the USB half: finishes knob presses and reports layer and mods.
+void screens_task(void);

@@ -31,6 +31,7 @@ type state struct {
 	agents           Agents
 	hasAgents        bool
 	artURL           string // the track whose art media.Art is, or is waiting for
+	keyboard         *jsKeyboard
 }
 
 func (s *state) update(f func(*state)) {
@@ -46,7 +47,9 @@ func (s *state) data(now time.Time) jsData {
 	if s.hasAgents {
 		a = &s.agents
 	}
-	return toJS(s.sys, s.cpuHist, s.gpuHist, s.media, a, now)
+	d := toJS(s.sys, s.cpuHist, s.gpuHist, s.media, a, now)
+	d.Keyboard = s.keyboard
+	return d
 }
 
 func main() {
@@ -95,8 +98,11 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 	defer tick.Stop()
 	var (
 		dev       *device
-		events    <-chan byte
+		events    <-chan event
 		sender    frameSender
+		shown     display // last brightness sent
+		brightAt  time.Time
+		awakeAt   time.Time
 		nextOpen  time.Time
 		lastCheck time.Time
 		say       = dedupLog()
@@ -118,10 +124,11 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 				events = nil
 				continue
 			}
-			if ev == eventKnob {
-				if err := rend.pressKnob(); err != nil {
-					say("knob: %v", err)
-				}
+			if ev.kind == eventState {
+				kb := toKeyboard(ev.a, ev.b)
+				st.update(func(st *state) { st.keyboard = kb })
+			} else if err := rend.pressKnob(ev.kind); err != nil {
+				say("knob: %v", err)
 			}
 			continue
 		case <-tick.C:
@@ -165,11 +172,23 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 			log.Printf("sending to %s", path)
 			events = dev.events()
 			sender.reset()
+			brightAt, awakeAt = time.Time{}, time.Time{}
 		}
 		if dev == nil {
 			continue
 		}
-		for _, r := range sender.reports(frame, now) {
+		reports := sender.reports(frame, now)
+		// brightness on change and with every full resend; keep-awake every second while wanted
+		disp := rend.display()
+		if disp.brightness != shown.brightness || now.Sub(brightAt) >= fullEvery {
+			reports = append(reports, report{msgBrightness, byte(disp.brightness)})
+			shown.brightness, brightAt = disp.brightness, now
+		}
+		if disp.keepAwake && now.Sub(awakeAt) >= time.Second {
+			reports = append(reports, report{msgKeepAwake, 3})
+			awakeAt = now
+		}
+		for _, r := range reports {
 			if err := dev.send(r); err != nil {
 				say("keyboard: %v; reconnecting", err)
 				dev.close()

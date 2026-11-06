@@ -7,6 +7,11 @@
 const W = 32, H = 128;
 const FONT = new Uint8Array(FONT_BUFFER);
 
+// Set by the screens, read by kbscreen after every frame: the left OLED's
+// brightness (0..255), and whether both OLEDs stay on past the 60 s idle
+// blanking.
+const display = { brightness: 255, keepAwake: false };
+
 // 3x5 glyphs on a 4-pixel pitch (8 characters a line), top row first.
 const TINY = {
   ' ': '000000000000000', '!': '010010010000010', '%': '101001010100101', '*': '010101010000000',

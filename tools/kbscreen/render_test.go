@@ -74,7 +74,7 @@ func TestBuiltInScreensRender(t *testing.T) {
 	} {
 		r.frame(c.d, 0) // lets the script see the context before the presses
 		for range c.presses {
-			if err := r.pressKnob(); err != nil {
+			if err := r.pressKnob(eventKnob); err != nil {
 				t.Fatalf("%s: knob: %v", c.name, err)
 			}
 		}
@@ -160,5 +160,40 @@ func TestRunawayScriptIsStopped(t *testing.T) {
 	// the runtime is usable again afterwards
 	if _, err := r.frame(testData(false, nil), 0); err == nil || !strings.Contains(err.Error(), "longer than") {
 		t.Fatalf("second render: %v", err)
+	}
+}
+
+// What the built-in screens do with the knob gestures and the display object:
+// a double press goes back a screen, a long press back to automatic, music
+// keeps the screens on, the night dims them; the keyboard's state reaches d.
+func TestBuiltInKnobAndDisplay(t *testing.T) {
+	r, err := newRenderer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := testData(false, nil)
+	perf, _ := r.frame(d, 0)
+	r.pressKnob(eventKnob)
+	music, _ := r.frame(d, 0)
+	r.pressKnob(eventKnobDouble)
+	if f, _ := r.frame(d, 0); !bytes.Equal(f, perf) || bytes.Equal(f, music) {
+		t.Fatal("double press did not go back to perf")
+	}
+	r.pressKnob(eventKnob)
+	r.pressKnob(eventKnobLong)
+	if f, _ := r.frame(d, 0); !bytes.Equal(f, perf) {
+		t.Fatal("long press did not go back to the automatic screen")
+	}
+	if disp := r.display(); disp.keepAwake || disp.brightness != 255 {
+		t.Fatalf("idle afternoon: %+v", disp)
+	}
+	d = testData(true, nil)
+	d.Sys.Clock = "23:10"
+	r.frame(d, 0)
+	if disp := r.display(); !disp.keepAwake || disp.brightness >= 255 {
+		t.Fatalf("music at night: %+v", disp)
+	}
+	if kb := toKeyboard(2, 0x20|0x01); kb.Layer != "lower" || !kb.Ctrl || !kb.Shift || kb.Alt || kb.Gui {
+		t.Fatalf("keyboard state: %+v", kb)
 	}
 }

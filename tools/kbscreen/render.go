@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -108,6 +109,13 @@ func runBounded(vm *goja.Runtime, f func() (goja.Value, error)) (goja.Value, err
 	return f()
 }
 
+// display is what the scripts set in their display object: brightness 0..255
+// and whether to keep the OLEDs on.
+type display struct {
+	brightness int
+	keepAwake  bool
+}
+
 // frame renders one frame from d at t milliseconds.
 func (r *renderer) frame(d jsData, t int64) ([]byte, error) {
 	v, err := runBounded(r.vm, func() (goja.Value, error) {
@@ -123,19 +131,60 @@ func (r *renderer) frame(d jsData, t int64) ([]byte, error) {
 	return append([]byte(nil), b...), nil
 }
 
-func (r *renderer) pressKnob() error {
-	if r.knob == nil {
+func (r *renderer) display() display {
+	out := display{brightness: 255}
+	obj := r.vm.Get("display")
+	if obj == nil || goja.IsUndefined(obj) || goja.IsNull(obj) {
+		return out
+	}
+	o := obj.ToObject(r.vm)
+	if v := o.Get("brightness"); v != nil && !goja.IsUndefined(v) {
+		out.brightness = int(min(max(v.ToInteger(), 0), 255))
+	}
+	if v := o.Get("keepAwake"); v != nil {
+		out.keepAwake = v.ToBoolean()
+	}
+	return out
+}
+
+var knobKinds = map[byte]string{eventKnob: "press", eventKnobLong: "long", eventKnobDouble: "double"}
+
+// pressKnob calls knob(kind) with "press", "long" or "double".
+func (r *renderer) pressKnob(kind byte) error {
+	if r.knob == nil || knobKinds[kind] == "" {
 		return nil
 	}
-	_, err := runBounded(r.vm, func() (goja.Value, error) { return r.knob(goja.Undefined()) })
+	_, err := runBounded(r.vm, func() (goja.Value, error) { return r.knob(goja.Undefined(), r.vm.ToValue(knobKinds[kind])) })
 	return err
 }
 
 // What render(d, t) gets. Field names are the json tags.
 type jsData struct {
-	Sys    jsSys     `json:"sys"`
-	Media  jsMedia   `json:"media"`
-	Agents *jsAgents `json:"agents"` // null without Agentique
+	Sys      jsSys       `json:"sys"`
+	Media    jsMedia     `json:"media"`
+	Agents   *jsAgents   `json:"agents"`   // null without Agentique
+	Keyboard *jsKeyboard `json:"keyboard"` // null until the keyboard reports
+}
+
+type jsKeyboard struct {
+	Layer string `json:"layer"` // base, game, lower, raise
+	Ctrl  bool   `json:"ctrl"`
+	Shift bool   `json:"shift"`
+	Alt   bool   `json:"alt"`
+	Gui   bool   `json:"gui"`
+}
+
+// The keymap's layers, in layers.h order.
+var layerNames = []string{"base", "game", "lower", "raise"}
+
+func toKeyboard(layer, mods byte) *jsKeyboard {
+	name := "layer" + strconv.Itoa(int(layer))
+	if int(layer) < len(layerNames) {
+		name = layerNames[layer]
+	}
+	// QMK's mod bits: ctrl, shift, alt, gui on the left, then the same on the right
+	has := func(bit byte) bool { return mods&(bit|bit<<4) != 0 }
+	return &jsKeyboard{Layer: name, Ctrl: has(1), Shift: has(2), Alt: has(4), Gui: has(8)}
 }
 
 type jsSys struct {

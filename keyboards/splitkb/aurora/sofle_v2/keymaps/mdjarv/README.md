@@ -17,7 +17,7 @@ Behaviour worth knowing:
 - **Esc / Right Shift** is one mod-tap key. Permissive hold makes pressing and releasing another key while it is down count as Shift.
 - **Knobs**: left is volume, right is scroll; both do nothing on Lower. Pressing the right knob shows the next left-OLED screen.
 - **Debounce** is `asym_eager_defer_pk` at 10 ms: presses register at once, releases wait 10 ms of stable contact, which swallows switch chatter.
-- **Left OLED** is drawn by `tools/kbscreen` on the computer (perf, music, agents; the screens are JavaScript in `tools/kbscreen/js`, editable live). The keyboard shows its frames, or the cat when it sends nothing for 3 s. Pressing the right knob goes to kbscreen, which shows the next screen.
+- **Left OLED** is drawn by `tools/kbscreen` on the computer (perf, music, agents; the screens are JavaScript in `tools/kbscreen/js`, editable live). The keyboard shows its frames, or the cat when it sends nothing for 3 s. Right knob presses go to kbscreen: once for the next screen, twice for the previous one, held to go back to the automatic choice. kbscreen also sets the left OLED's brightness (dimmer at night) and keeps both screens on while music plays.
 - **Right OLED** is the top half of the headphones animation (the amazed face in game mode) over the layer icon and the Gui/Alt/Ctrl/Shift tiles.
 - **OLEDs** blank after 60 s without input. RGB is off.
 

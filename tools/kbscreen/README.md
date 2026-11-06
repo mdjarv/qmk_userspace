@@ -13,7 +13,8 @@ Draws the Sofle's left OLED and sends it over Raw HID. The keyboard only shows t
 The service runs the repo's `js/` (`make screen-install` points it there) and serves a preview at http://localhost:8077, so: edit `js/screens.js`, save, look at the keyboard or the preview. A script that does not load, or a frame that throws or takes over 200 ms, is logged (`journalctl --user -u kbscreen -f`) and shown on the preview page, and the last good version keeps drawing.
 
 - `lib.js` is loaded first: `Frame` (a 512-byte buffer in OLED layout with `px`, `fill`, `rect`, `dotted`, `text`/`glyph` in the keyboard's 6x8 font, `tiny` in a 3x5 font, `sprite` from `'#'` rows, `pages` for raw bytes), `W` = 32, `H` = 128.
-- `screens.js` defines `render(d, t)`, returning a 512-byte `Uint8Array`, and optionally `knob()`, called on a press of the right knob. `t` is milliseconds since kbscreen started. Globals survive between frames, not across reloads.
+- `lib.js` also defines `display`: set `display.brightness` (0..255, the left OLED) and `display.keepAwake` (both OLEDs stay on past the 60 s idle blanking while true) in `render`; kbscreen sends them on.
+- `screens.js` defines `render(d, t)`, returning a 512-byte `Uint8Array`, and optionally `knob(kind)`, called when the right knob is pressed: `"press"`, `"double"` (twice within 250 ms) or `"long"` (held 500 ms). A single press arrives 250 ms late, once the keyboard knows it was not a double. `t` is milliseconds since kbscreen started. Globals survive between frames, not across reloads.
 
 `d` (see `jsData` in `render.go`):
 
@@ -21,6 +22,7 @@ The service runs the repo's `js/` (`make screen-install` points it there) and se
 |---|---|
 | `d.sys` | `cpu`, `gpu` (percent), `cpuHistory`, `gpuHistory` (last 32 s, oldest first), `ramUsed`, `ramTotal`, `vramUsed`, `vramTotal` (GiB; VRAM includes GTT spill), `battery` (percent), `batteryState` (`charging`, `discharging`, `hidden`), `clock` (`14:53`) |
 | `d.media` | `playing`, `title`, `artist` (ASCII), `position`, `length` (s), `volume` (percent, -1 unknown), `muted`, `volumeChangedAgo` (ms, -1 never), `art` (128 bytes, 32x32 in OLED layout), `bands` (10 spectrum bands 0..255) |
+| `d.keyboard` | `null` until the keyboard reports; else `layer` (`base`, `game`, `lower`, `raise`), `ctrl`, `shift`, `alt`, `gui` |
 | `d.agents` | `null` without Agentique; else `rows` (`{name, state}`, state `working`, `waiting`, `done`, `idle`; sessions updated in the last hour, newest first), `running`, `waiting`, `laterWaiting`, `laterIdle`, `oldestWait` (`3D`), `newQuestion` (a question in the last 10 minutes) |
 
 `make screen` runs kbscreen in the foreground with the same scripts and preview (stop the service first); `DRY=1` also leaves the keyboard alone and logs the data once a second.
