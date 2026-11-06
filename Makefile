@@ -49,7 +49,7 @@ KBSCREEN := $(KBSCREEN_DIR)/kbscreen
 
 PREVIEW ?= localhost:8077
 
-$(KBSCREEN): $(wildcard $(KBSCREEN_DIR)/*.go) $(wildcard $(KBSCREEN_DIR)/js/*.js) $(KBSCREEN_DIR)/go.mod
+$(KBSCREEN): $(wildcard $(KBSCREEN_DIR)/*.go) $(wildcard $(KBSCREEN_DIR)/js/*.js $(KBSCREEN_DIR)/js/pages/*.js) $(KBSCREEN_DIR)/go.mod
 	cd $(KBSCREEN_DIR) && go build -o kbscreen .
 
 # Runs in the foreground with the repo's scripts (reloaded on save) and the

@@ -10,11 +10,25 @@ Draws the Sofle's left OLED and sends it over Raw HID. The keyboard only shows t
 
 ## Editing the screens
 
-The service runs the repo's `js/` (`make screen-install` points it there) and serves a preview at http://localhost:8077, so: edit `js/screens.js`, save, look at the keyboard or the preview. A script that does not load, or a frame that throws or takes over 200 ms, is logged (`journalctl --user -u kbscreen -f`) and shown on the preview page, and the last good version keeps drawing.
+The service runs the repo's `js/` (`make screen-install` points it there) and serves a preview at http://localhost:8077, so: edit a page in `js/pages/`, save, look at the keyboard or the preview (`/frame.png` is the current frame, `/error` the last script error). New files are picked up too. A script that does not load, or a frame that throws or takes over 200 ms, is logged (`journalctl --user -u kbscreen -f`) and shown on the preview page, and the last good version keeps drawing.
 
-- `lib.js` is loaded first: `Frame` (a 512-byte buffer in OLED layout with `px`, `fill`, `rect`, `dotted`, `text`/`glyph` in the keyboard's 6x8 font, `tiny` in a 3x5 font, `sprite` from `'#'` rows, `pages` for raw bytes), `W` = 32, `H` = 128.
-- `lib.js` also defines `display`: set `display.brightness` (0..255, the left OLED) and `display.keepAwake` (both OLEDs stay on past the 60 s idle blanking while true) in `render`; kbscreen sends them on.
-- `screens.js` defines `render(d, t)`, returning a 512-byte `Uint8Array`, and optionally `knob(kind)`, called when the right knob is pressed: `"press"`, `"double"` (twice within 250 ms) or `"long"` (held 500 ms). A single press arrives 250 ms late, once the keyboard knows it was not a double. `t` is milliseconds since kbscreen started. Globals survive between frames, not across reloads.
+Files load in this order, into one global scope:
+
+- `lib.js`: `Frame` (a 512-byte buffer in OLED layout with `px`, `fill`, `rect`, `dotted`, `text`/`glyph` in the keyboard's 6x8 font, `tiny`/`tinyRight` in a 3x5 font, `sprite` from `'#'` rows, `pages` for raw bytes), `W` = 32, `H` = 128, and what pages share: `f` (the frame they draw into, cleared before each page), `page(name, draw)`, `robot(x, y, state, t, i)` (the 9x9 agent avatar), `asking(d)`, and `display`.
+- `pages/*.js` in name order, one page each. A page registers a `draw(d, t)` that draws into `f`; the file name's number sets the knob order. Keep a page's helpers inside its wrapping function so pages cannot clash:
+  ```js
+  'use strict';
+  page('zoo', (function () {
+    const CAGE = ['#####', '#...#', '#####'];   // private to this page
+    return function zoo(d, t) {
+      f.sprite(CAGE, 0, 0);
+    };
+  })());
+  ```
+- `main.js`: `render(d, t)` (picks the page, sets `display`, draws the volume readout over any page, returns `f.buf`) and `knob(kind)`, called with `"press"`, `"double"` (twice within 250 ms) or `"long"` (held 500 ms). A single press arrives 250 ms late, once the keyboard knows it was not a double. `context(d)` there decides which page comes up by itself.
+- `display`: set `display.brightness` (0..255, the left OLED) and `display.keepAwake` (both OLEDs stay on past the 60 s idle blanking while true); kbscreen sends them on.
+
+`t` is milliseconds since kbscreen started. Globals survive between frames, not across reloads.
 
 `d` (see `jsData` in `render.go`):
 
@@ -31,7 +45,7 @@ The service runs the repo's `js/` (`make screen-install` points it there) and se
 
 | File | Holds |
 |---|---|
-| `js/lib.js`, `js/screens.js` | The screens (also built into the binary, used without `-scripts`) |
+| `js/lib.js`, `js/pages/*.js`, `js/main.js` | The pages (also built into the binary, used without `-scripts`) |
 | `render.go` | goja runtime, reload, the `d` object (`jsData`) |
 | `frame.go`, `device.go` | Frame chunks, commands and keyboard events over hidraw |
 | `sys.go`, `media.go`, `art.go`, `spectrum.go`, `agents.go` | The data sources |

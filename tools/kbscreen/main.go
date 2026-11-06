@@ -56,7 +56,7 @@ func main() {
 	home, _ := os.UserHomeDir()
 	config := flag.String("config", filepath.Join(home, ".config/kbscreen/config.toml"),
 		"config file: [agentique] url and token (see README)")
-	scripts := flag.String("scripts", "", "directory with lib.js and screens.js, reloaded on save (default: the built-in ones)")
+	scripts := flag.String("scripts", "", "directory with lib.js, pages/*.js and main.js, reloaded on save (default: the built-in ones)")
 	preview := flag.String("preview", "", "serve a live preview of the screen on this address, e.g. localhost:8077")
 	dry := flag.Bool("dry", false, "do not look for the keyboard; log the data once a second")
 	flag.Parse()

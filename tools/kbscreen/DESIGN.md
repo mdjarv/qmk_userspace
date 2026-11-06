@@ -31,7 +31,7 @@ Each came from a round of mockups or from using it on the keyboard (2026-11-06).
 
 ## Working method
 
-Design work runs as rounds on one page of mockups, each option shown inside the real two-screen context, with a marked recommendation; answers come back short ("S2, P3", "less aggressive"). Now that the screens are JavaScript, a mockup can be the real `screens.js` running against live data: edit, look at http://localhost:8077, screenshot `frame.png` for a round.
+Design work runs as rounds on one page of mockups, each option shown inside the real two-screen context, with a marked recommendation; answers come back short ("S2, P3", "less aggressive"). Now that the screens are JavaScript, a mockup can be a real page file running against live data: edit, look at http://localhost:8077, screenshot `frame.png` for a round.
 
 ## Known trade-offs
 

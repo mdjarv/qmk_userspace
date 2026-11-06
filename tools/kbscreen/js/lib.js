@@ -82,3 +82,32 @@ class Frame {
     rows.forEach((r, yy) => { for (let xx = 0; xx < r.length; xx++) if (r[xx] === '#') this.px(x + xx, y + yy, on); });
   }
 }
+
+// ---- shared by the pages ---------------------------------------------------
+
+// The frame every page draws into; main.js clears it before each page.
+const f = new Frame();
+
+// Pages register here, in file name order (pages/10-perf.js before
+// pages/20-music.js); that is also the knob order.
+const PAGES = [];
+function page(name, draw) { PAGES.push({ name, draw }); }
+
+// Whether an agent asked something in the last 10 minutes.
+const asking = d => d.agents && d.agents.newQuestion;
+
+// A 9x9 robot: solid head with cut-out eyes and mouth, hollow when idle.
+// Working sways its antenna, done smiles, waiting asks (?), idle sleeps (Z).
+const ANTENNA = ['....#....', '...#.....', '....#....', '.....#...'];
+const HEAD = {
+  open: ['..#####..', '.#######.', '.#..#..#.', '.#######.', '.##...##.', '.#######.', '..#...#..'],
+  smile: ['..#####..', '.#######.', '.#..#..#.', '.#######.', '.#.###.#.', '.##...##.', '..#...#..'],
+  hollow: ['..#####..', '.#.....#.', '.#.#.#.#.', '.#.....#.', '.#.###.#.', '.#.....#.', '..#####..'],
+};
+function robot(x, y, state, t, i = 0) {
+  const antenna = state === 'working' ? ANTENNA[Math.floor(t / 500 + i) % 4] : ANTENNA[0];
+  const head = state === 'done' ? HEAD.smile : state === 'idle' ? HEAD.hollow : HEAD.open;
+  f.sprite([antenna, '....#....', ...head], x, y);
+  if (state === 'waiting') f.tiny('?', x + 9, y);
+  if (state === 'idle') f.tiny('Z', x + 9, y);
+}

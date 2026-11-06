@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -14,14 +15,13 @@ import (
 	"github.com/dop251/goja"
 )
 
-// The screens are JavaScript (js/lib.js, then js/screens.js), run in goja.
-// With a script directory they reload when a file changes; a version that
-// fails to load leaves the last good one running.
+// The screens are JavaScript run in goja: js/lib.js, then js/pages/*.js in
+// name order (one page each), then js/main.js. With a script directory they
+// reload when a file changes, appears or goes; a version that fails to load
+// leaves the last good one running.
 
-//go:embed js/*.js
+//go:embed js/*.js js/pages/*.js
 var embeddedScripts embed.FS
-
-var scriptFiles = []string{"lib.js", "screens.js"}
 
 const renderTimeout = 200 * time.Millisecond // a runaway script is stopped after this
 
@@ -41,11 +41,33 @@ func newRenderer(dir string) (*renderer, error) {
 	return r, nil
 }
 
+// scripts lists the files to load, relative to the script directory.
+func (r *renderer) scripts() ([]string, error) {
+	var pages []string
+	var err error
+	if r.dir == "" {
+		pages, err = fs.Glob(embeddedScripts, "js/pages/*.js")
+		for i := range pages {
+			pages[i] = strings.TrimPrefix(pages[i], "js/")
+		}
+	} else {
+		pages, err = filepath.Glob(filepath.Join(r.dir, "pages", "*.js"))
+		for i := range pages {
+			pages[i] = filepath.Join("pages", filepath.Base(pages[i]))
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	sort.Strings(pages)
+	return append(append([]string{"lib.js"}, pages...), "main.js"), nil
+}
+
 func (r *renderer) source(name string) (string, error) {
 	var b []byte
 	var err error
 	if r.dir == "" {
-		b, err = fs.ReadFile(embeddedScripts, "js/"+name)
+		b, err = fs.ReadFile(embeddedScripts, "js/"+filepath.ToSlash(name))
 	} else {
 		b, err = os.ReadFile(filepath.Join(r.dir, name))
 	}
@@ -57,7 +79,8 @@ func (r *renderer) stat() map[string]time.Time {
 	if r.dir == "" {
 		return m
 	}
-	for _, name := range scriptFiles {
+	names, _ := r.scripts()
+	for _, name := range names {
 		if fi, err := os.Stat(filepath.Join(r.dir, name)); err == nil {
 			m[name] = fi.ModTime()
 		}
@@ -71,7 +94,11 @@ func (r *renderer) load() error {
 	vm := goja.New()
 	vm.SetFieldNameMapper(goja.TagFieldNameMapper("json", true))
 	vm.Set("FONT_BUFFER", vm.NewArrayBuffer(glcdFont))
-	for _, name := range scriptFiles {
+	names, err := r.scripts()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
 		src, err := r.source(name)
 		if err != nil {
 			return err
@@ -82,7 +109,7 @@ func (r *renderer) load() error {
 	}
 	render, ok := goja.AssertFunction(vm.Get("render"))
 	if !ok {
-		return errors.New("screens.js defines no render(d, t)")
+		return errors.New("main.js defines no render(d, t)")
 	}
 	knob, _ := goja.AssertFunction(vm.Get("knob"))
 	r.vm, r.render, r.knob, r.mtimes = vm, render, knob, mtimes

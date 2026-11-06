@@ -11,19 +11,18 @@ External QMK userspace for one keyboard: splitkb Aurora Sofle v2 with Liatris (R
   - `screens.c`, `hostdata.[ch]`: the left (USB) OLED only shows frames from `tools/kbscreen` (the cat when it is silent for 3 s). It sends back the right knob's single/double/long presses and layer + mods, and takes brightness and keep-awake commands. `hostdata.h` is that protocol; `tools/kbscreen/frame.go` must match it. Don't name a keymap header after a QMK one (`host.h` shadowed QMK's and broke `sofle_v2.c`).
   - `config.h`, `rules.mk`: only what keymap.json cannot express.
 - `tools/kbflash/`: Go (Bubble Tea) tool behind `make flash|backup|restore|drill`. Halves are recognised by RP2040 flash ID from `kbflash.json`; picotool `--ser` matches the flash ID, not the USB serial. Tests: `got --report .` in that directory (a fake picotool and fake sysfs drive the real flow).
-- `tools/kbscreen/`: Go daemon that draws the left OLED (systemd user unit `kbscreen`). It gathers the data (/proc, amdgpu sysfs, battery, clock, playerctl + wpctl/pactl, parec spectrum, Agentique's read API with `url` and read `token` in `~/.config/kbscreen/config.toml`) and runs the screens, which are JavaScript in `js/` (goja). Its README is the scripting reference; `DESIGN.md` holds the design verdicts. Tests: `got --report .` in that directory.
+- `tools/kbscreen/`: Go daemon that draws the left OLED (systemd user unit `kbscreen`). It gathers the data (/proc, amdgpu sysfs, battery, clock, playerctl + wpctl/pactl, parec spectrum, Agentique's read API with `url` and read `token` in `~/.config/kbscreen/config.toml`) and runs the pages, which are JavaScript in `js/` (goja). Its README is the scripting reference; `DESIGN.md` holds the design verdicts. Tests: `got --report .` in that directory.
 - `archive/vial-2026-10-21.vil`: the Vial layout this keymap came from.
 
 ## Left OLED pages
 
-New pages and changes to them never need a flash: they are `tools/kbscreen/js/screens.js` (drawing helpers in `lib.js`).
+New pages and changes to them never need a flash: they are JavaScript in `tools/kbscreen/js/`, one file per page in `pages/`, with drawing helpers in `lib.js` and the page switching in `main.js`.
 
 - Read `tools/kbscreen/DESIGN.md` first, then the README's scripting section (what `render(d, t)`, `knob(kind)`, `display` and every field of `d` are).
 - Loop: edit and save; the running service reloads within a second; look at the keyboard or http://localhost:8077 (`/frame.png` for a screenshot to put in a design round, `/error` for the last script error). A broken save keeps the last good version drawing; `journalctl --user -u kbscreen -f` has the log.
-- A page is a function drawing into the `Frame`; add it to `SCREENS` (knob order) and to `render`'s dispatch, and to `context` if it should come up by itself.
-- Only `lib.js` and `screens.js` are loaded (`scriptFiles` in `render.go`). Splitting pages into more files means extending that list.
+- A page is a new file `pages/NN-name.js` registering one draw function with `page('name', ...)`, its own helpers kept inside the file's wrapping function (the files share one global scope). The number sets the knob order. `main.js` only needs a change if the page should come up by itself (`context`).
 - New data needs Go: a source (like `sys.go`), a field in `Sys`/`Media` (`types.go`), its mapping into `jsData`/`toJS` (`render.go`), a line in the README's table, and a test of the source against fake files. Rebuild with `make screen-install`.
-- The Go tests check the contract (frames, reload, runaway scripts, every built-in screen draws), not pixels, so restyling a screen does not break them. Run them after changing `screens.js` anyway: they catch a page that throws.
+- The Go tests check the contract (frames, reload, new page files, runaway scripts, every built-in page draws), not pixels, so restyling a page does not break them. Run them after changing the scripts anyway: they catch a page that throws.
 - Still firmware (needs a flash): anything about the right OLED, the cat fallback and its 3 s timeout, the 60 s idle blanking, the knob timings, frame rates above 20 fps, and new kinds of keyboard input. Keystrokes are not sent to the host on purpose; typing-driven pages should read the keyboard's input device on the computer.
 
 ## Workflow

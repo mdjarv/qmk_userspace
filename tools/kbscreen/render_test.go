@@ -96,12 +96,18 @@ func TestBuiltInScreensRender(t *testing.T) {
 
 func copyScripts(t *testing.T) string {
 	dir := t.TempDir()
-	for _, name := range scriptFiles {
-		b, err := fs.ReadFile(embeddedScripts, "js/"+name)
-		if err != nil {
-			t.Fatal(err)
+	err := fs.WalkDir(embeddedScripts, "js", func(path string, e fs.DirEntry, err error) error {
+		if err != nil || e.IsDir() {
+			return err
 		}
-		write(t, filepath.Join(dir, name), b)
+		b, err := fs.ReadFile(embeddedScripts, path)
+		if err == nil {
+			write(t, filepath.Join(dir, strings.TrimPrefix(path, "js/")), b)
+		}
+		return err
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	return dir
 }
@@ -124,7 +130,7 @@ func TestReloadKeepsLastGoodScript(t *testing.T) {
 	d := testData(false, nil)
 	before, _ := r.frame(d, 0)
 
-	path := filepath.Join(dir, "screens.js")
+	path := filepath.Join(dir, "main.js")
 	touch(t, path, "function render(d, t) { return f.buf", time.Now().Add(time.Minute))
 	if !r.changed() {
 		t.Fatal("a saved script was not noticed")
@@ -136,7 +142,7 @@ func TestReloadKeepsLastGoodScript(t *testing.T) {
 		t.Fatalf("the last good script stopped drawing: %v", err)
 	}
 
-	touch(t, path, "const f = new Frame(); function render(d, t) { f.fill(0, 0, W, H); return f.buf; }", time.Now().Add(2*time.Minute))
+	touch(t, path, "function render(d, t) { f.fill(0, 0, W, H); return f.buf; }", time.Now().Add(2*time.Minute))
 	if err := r.load(); err != nil {
 		t.Fatal(err)
 	}
@@ -147,7 +153,7 @@ func TestReloadKeepsLastGoodScript(t *testing.T) {
 
 func TestRunawayScriptIsStopped(t *testing.T) {
 	dir := copyScripts(t)
-	write(t, filepath.Join(dir, "screens.js"), []byte("function render(d, t) { for (;;) {} }"))
+	write(t, filepath.Join(dir, "main.js"), []byte("function render(d, t) { for (;;) {} }"))
 	r, err := newRenderer(dir)
 	if err != nil {
 		t.Fatal(err)
@@ -195,5 +201,33 @@ func TestBuiltInKnobAndDisplay(t *testing.T) {
 	}
 	if kb := toKeyboard(2, 0x20|0x01); kb.Layer != "lower" || !kb.Ctrl || !kb.Shift || kb.Alt || kb.Gui {
 		t.Fatalf("keyboard state: %+v", kb)
+	}
+}
+
+// A new file in pages/ is noticed and becomes a page, after the built-in ones
+// in the knob order.
+func TestNewPageFileIsLoaded(t *testing.T) {
+	dir := copyScripts(t)
+	r, err := newRenderer(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	touch(t, filepath.Join(dir, "pages", "40-zoo.js"),
+		"'use strict';\npage('zoo', (function () { return function zoo(d, t) { f.fill(0, 0, W, H); }; })());\n",
+		time.Now().Add(time.Minute))
+	if !r.changed() {
+		t.Fatal("a new page file was not noticed")
+	}
+	if err := r.load(); err != nil {
+		t.Fatal(err)
+	}
+	d := testData(false, nil)
+	d.Media.VolumeChangedAgo = -1 // no volume readout over the page
+	r.frame(d, 0)
+	for range 3 { // perf -> music -> agents -> zoo
+		r.pressKnob(eventKnob)
+	}
+	if f, err := r.frame(d, 0); err != nil || bytes.Count(f, []byte{0xFF}) != frameSize {
+		t.Fatalf("the zoo page did not show: %v", err)
 	}
 }
