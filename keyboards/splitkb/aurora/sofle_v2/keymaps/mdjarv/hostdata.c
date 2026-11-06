@@ -37,13 +37,16 @@ static void receive_text(const uint8_t *d) {
 }
 
 static void receive_agents(const uint8_t *d) {
-    uint8_t total = MIN(d[1], HOST_AGENT_ROWS), first = d[2], n = MIN(d[3], 4);
+    uint8_t total = MIN(d[1], HOST_AGENT_ROWS), first = d[2], n = MIN(d[3], 3);
     host.agent_count    = total;
     host.agents_running = d[4];
     host.agents_waiting = d[5];
-    host.agents_idle    = d[6];
+    host.later_waiting  = d[6];
+    host.later_idle     = d[7];
+    host.oldest_wait    = d[8];
+    host.new_question   = d[9] & 1;
     for (uint8_t i = 0; i < n && first + i < HOST_AGENT_ROWS; i++) {
-        const uint8_t *row = d + 7 + i * 6;
+        const uint8_t *row = d + 10 + i * 6;
         agent_row_t   *dst = &host.agents[first + i];
         memcpy(dst->name, row, 5);
         dst->name[5] = 0;

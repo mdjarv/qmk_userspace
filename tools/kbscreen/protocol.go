@@ -3,7 +3,10 @@ package main
 // Raw HID reports for the keyboard's left OLED. The firmware side, and the
 // byte layout of each report, is keyboards/.../keymaps/mdjarv/hostdata.h.
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 const reportSize = 32
 
@@ -26,8 +29,8 @@ const (
 	artSize    = 128
 	artChunk   = 28
 	bandCount  = 10
-	agentRows  = 8
-	agentChunk = 4
+	agentRows  = 6 // sessions updated in the last hour
+	agentChunk = 3
 )
 
 const (
@@ -103,8 +106,12 @@ type AgentRow struct {
 }
 
 type Agents struct {
-	Rows                   []AgentRow // at most agentRows are sent
-	Running, Waiting, Idle int
+	Rows             []AgentRow // updated in the last hour, newest first; agentRows are sent
+	Running, Waiting int        // over every live session
+	LaterWaiting     int        // questions older than an hour
+	LaterIdle        int        // idle or finished sessions older than an hour
+	OldestWait       time.Duration
+	NewQuestion      bool // a session started waiting in the last 10 minutes
 }
 
 func (a Agents) reports() []report {
@@ -113,15 +120,31 @@ func (a Agents) reports() []report {
 	for first := 0; first == 0 || first < len(rows); first += agentChunk {
 		chunk := rows[first:min(first+agentChunk, len(rows))]
 		r := report{msgAgents, byte(len(rows)), byte(first), byte(len(chunk)),
-			clamp8(a.Running), clamp8(a.Waiting), clamp8(a.Idle)}
+			clamp8(a.Running), clamp8(a.Waiting), clamp8(a.LaterWaiting), clamp8(a.LaterIdle), ageCode(a.OldestWait)}
+		if a.NewQuestion {
+			r[9] = 1
+		}
 		for i, row := range chunk {
 			name := []byte(asciiOnly(strings.ToUpper(row.Name)) + "     ")[:5]
-			copy(r[7+i*6:], name)
-			r[7+i*6+5] = row.State
+			copy(r[10+i*6:], name)
+			r[10+i*6+5] = row.State
 		}
 		out = append(out, r)
 	}
 	return out
+}
+
+// ageCode packs an age into a byte: minutes 0..59, then 60+hours up to a day,
+// then 84+days.
+func ageCode(d time.Duration) byte {
+	switch {
+	case d < time.Hour:
+		return byte(max(d, 0) / time.Minute)
+	case d < 24*time.Hour:
+		return byte(60 + d/time.Hour)
+	default:
+		return byte(min(84+d/(24*time.Hour), 255))
+	}
 }
 
 func clamp8(n int) byte { return byte(min(max(n, 0), 255)) }

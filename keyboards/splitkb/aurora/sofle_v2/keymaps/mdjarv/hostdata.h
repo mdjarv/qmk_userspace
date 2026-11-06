@@ -19,9 +19,13 @@ enum host_msg {
     HOST_ART = 0x04,
     // [1..10] spectrum bands 0..255, low to high
     HOST_SPECTRUM = 0x05,
-    // [1] rows in all (<= 8)  [2] first row in this report  [3] rows here (<= 4)
-    // [4] running  [5] waiting  [6] idle (totals over every session)
-    // [7..] rows of 6 bytes: 5 name chars (space padded) and a state
+    // [1] rows in all (<= 6)  [2] first row in this report  [3] rows here (<= 3)
+    // [4] running  [5] waiting (every live session)  [6] waiting, older than
+    // an hour  [7] idle or finished, older than an hour  [8] the oldest of
+    // those questions' age (minutes 0..59, 60+hours, 84+days)
+    // [9] flags (bit 0: a session started waiting in the last 10 minutes)
+    // [10..] rows of 6 bytes: 5 name chars (space padded) and a state.
+    // Rows are sessions updated in the last hour, newest first.
     HOST_AGENTS = 0x06,
 };
 
@@ -33,7 +37,7 @@ enum agent_state { AGENT_IDLE, AGENT_WORKING, AGENT_WAITING, AGENT_DONE };
 #define HOST_ART_SIZE 128
 #define HOST_BANDS 10
 #define HOST_HISTORY 32 // SYS samples kept for the graphs, one per pixel column
-#define HOST_AGENT_ROWS 8
+#define HOST_AGENT_ROWS 6
 
 typedef struct {
     char    name[6];
@@ -57,7 +61,9 @@ typedef struct {
     uint8_t  art[HOST_ART_SIZE];
     uint8_t  bands[HOST_BANDS];
 
-    uint8_t     agent_count, agents_running, agents_waiting, agents_idle;
+    uint8_t     agent_count, agents_running, agents_waiting;
+    uint8_t     later_waiting, later_idle, oldest_wait; // oldest_wait: age code, see HOST_AGENTS
+    bool        new_question;
     agent_row_t agents[HOST_AGENT_ROWS];
 } host_state_t;
 

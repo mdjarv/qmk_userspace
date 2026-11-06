@@ -60,35 +60,34 @@ func TestTextReportsChunkAndClear(t *testing.T) {
 	}
 }
 
-func TestAgentsOrderCountsAndReports(t *testing.T) {
-	waiting := &struct {
-		UnseenCompletedAt string `json:"unseenCompletedAt"`
-		ApprovalTool      string `json:"approvalTool"`
-		Question          bool   `json:"question"`
-		SurfacesWaiting   int    `json:"surfacesWaiting"`
-		WaitingSince      string `json:"waitingSince"`
-	}{SurfacesWaiting: 1}
-	unseen := &struct {
-		UnseenCompletedAt string `json:"unseenCompletedAt"`
-		ApprovalTool      string `json:"approvalTool"`
-		Question          bool   `json:"question"`
-		SurfacesWaiting   int    `json:"surfacesWaiting"`
-		WaitingSince      string `json:"waitingSince"`
-	}{UnseenCompletedAt: "2026-11-06T09:00:00Z"}
+type needsYou = struct {
+	UnseenCompletedAt string `json:"unseenCompletedAt"`
+	ApprovalTool      string `json:"approvalTool"`
+	Question          bool   `json:"question"`
+	SurfacesWaiting   int    `json:"surfacesWaiting"`
+	WaitingSince      string `json:"waitingSince"`
+}
+
+func TestAgentsNowLaterAndReports(t *testing.T) {
+	now := time.Date(2026, 11, 6, 13, 0, 0, 0, time.UTC)
+	unseen := &needsYou{UnseenCompletedAt: "2026-11-06T09:00:00Z"}
 	sessions := []readSession{
-		{ProjectID: "p1", State: "idle", UpdatedAt: "2026-11-06T10:00:00Z"},
-		{ProjectID: "p2", State: "running", UpdatedAt: "2026-11-06T12:30:00.5Z"},
-		{ProjectID: "p3", State: "stopped", NeedsYou: unseen, UpdatedAt: "2026-11-06T13:00:00Z"},
-		{ProjectID: "p3", State: "done", UpdatedAt: "2026-11-06T13:00:00Z"},
-		{ProjectID: "p4", State: "idle", NeedsYou: waiting, UpdatedAt: "2026-11-03T08:00:00Z"},
+		{ProjectID: "p1", State: "idle", UpdatedAt: "2026-11-06T12:10:00Z"},
+		{ProjectID: "p2", State: "running", UpdatedAt: "2026-11-06T12:58:00.5Z"},
+		// stopped and done stay out, even with an unseen turn
+		{ProjectID: "p3", State: "stopped", NeedsYou: unseen, UpdatedAt: "2026-11-06T12:59:00Z"},
+		{ProjectID: "p3", State: "done", UpdatedAt: "2026-11-06T12:59:00Z"},
+		// a question from days ago only counts; a new one gets a row and the flag
+		{ProjectID: "p4", State: "idle", NeedsYou: &needsYou{Question: true, WaitingSince: "2026-11-03T13:00:00Z"}, UpdatedAt: "2026-11-03T13:00:00Z"},
+		{ProjectID: "p6", State: "idle", NeedsYou: &needsYou{SurfacesWaiting: 1, WaitingSince: "2026-11-06T12:55:00Z"}, UpdatedAt: "2026-11-06T12:55:00Z"},
 		{ProjectID: "p5", State: "idle", NeedsYou: unseen, UpdatedAt: "2026-11-06T12:30:00Z"},
+		{ProjectID: "p1", State: "idle", UpdatedAt: "2026-11-05T10:00:00Z"},
 	}
-	names := map[string]string{"p1": "QMK Userspace", "p2": "The Pint", "p3": "Agentique", "p4": "seisiun", "p5": "terminal-drift"}
-	a := summarize(sessions, names)
-	// newest first whatever the state; a question from days ago sinks; stopped
-	// and done sessions stay out even with an unseen turn
-	want := []AgentRow{{"PINT", agentWorking}, {"TERMI", agentDone}, {"QMK", agentIdle}, {"SEISI", agentWaiting}}
-	if len(a.Rows) != len(want) || a.Waiting != 1 || a.Running != 1 || a.Idle != 1 {
+	names := map[string]string{"p1": "QMK Userspace", "p2": "The Pint", "p3": "Agentique", "p4": "seisiun", "p5": "terminal-drift", "p6": "hittat"}
+	a := summarize(sessions, names, now)
+	want := []AgentRow{{"PINT", agentWorking}, {"HITTA", agentWaiting}, {"TERMI", agentDone}, {"QMK", agentIdle}}
+	if len(a.Rows) != len(want) || a.Running != 1 || a.Waiting != 2 || a.LaterWaiting != 1 || a.LaterIdle != 1 ||
+		a.OldestWait != 72*time.Hour || !a.NewQuestion {
 		t.Fatalf("summarize = %+v", a)
 	}
 	for i := range want {
@@ -97,15 +96,16 @@ func TestAgentsOrderCountsAndReports(t *testing.T) {
 		}
 	}
 
-	for range 6 {
-		a.Rows = append(a.Rows, AgentRow{"X", agentIdle})
-	}
 	rs := a.reports()
-	if len(rs) != 2 || rs[0][1] != agentRows || rs[1][2] != 4 || rs[1][3] != 4 || string(rs[0][7:12]) != "PINT " || rs[0][12] != agentWorking {
+	if len(rs) != 2 || rs[0][1] != 4 || rs[1][2] != 3 || rs[1][3] != 1 || rs[0][8] != 84+3 || rs[0][9] != 1 ||
+		string(rs[0][10:15]) != "PINT " || rs[0][15] != agentWorking {
 		t.Fatalf("agent reports: % x", rs)
 	}
 	if rs := (Agents{}).reports(); len(rs) != 1 || rs[0][1] != 0 {
 		t.Fatalf("no sessions must still send one report: % x", rs)
+	}
+	if ageCode(5*time.Minute) != 5 || ageCode(3*time.Hour) != 63 {
+		t.Fatal("ageCode")
 	}
 }
 

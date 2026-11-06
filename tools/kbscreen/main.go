@@ -285,7 +285,8 @@ func dryRun(ctx context.Context, st *state, spectrum <-chan [bandCount]uint8) {
 			log.Printf("media playing=%v %d/%ds vol %d muted=%v %q / %q art %d px lit, bands %v",
 				m.Playing, m.Position, m.Length, m.Volume, m.Muted, m.Title, m.Artist, art, bands)
 			if has {
-				log.Printf("agents run %d wait %d idle %d rows %v", a.Running, a.Waiting, a.Idle, a.Rows)
+				log.Printf("agents run %d wait %d, later wait %d (oldest %s) idle %d, new question %v, rows %v",
+					a.Running, a.Waiting, a.LaterWaiting, a.OldestWait.Round(time.Minute), a.LaterIdle, a.NewQuestion, a.Rows)
 			}
 		}
 	}

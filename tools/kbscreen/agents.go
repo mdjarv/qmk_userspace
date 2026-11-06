@@ -139,7 +139,7 @@ func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
 			break
 		}
 	}
-	return summarize(s.Sessions, c.names), nil
+	return summarize(s.Sessions, c.names, time.Now()), nil
 }
 
 func (c *agentiqueClient) loadProjects(ctx context.Context) {
@@ -158,10 +158,16 @@ func (c *agentiqueClient) loadProjects(ctx context.Context) {
 	}
 }
 
-// summarize lists live sessions newest update first and counts them.
-// Stopped, failed and done (finished for good) sessions are left out, even
-// with a turn nobody looked at: Agentique keeps hundreds of those.
-func summarize(sessions []readSession, names map[string]string) Agents {
+const (
+	recentFor      = time.Hour        // updated within this, a session gets its own row
+	newQuestionFor = 10 * time.Minute // a question this fresh marks the other screens
+)
+
+// summarize splits live sessions into rows for those updated in the last
+// hour, newest first, and counts for the rest. Stopped, failed and done
+// (finished for good) sessions are left out, even with a turn nobody looked
+// at: Agentique keeps hundreds of those.
+func summarize(sessions []readSession, names map[string]string, now time.Time) Agents {
 	var a Agents
 	type ranked struct {
 		row     AgentRow
@@ -184,13 +190,30 @@ func summarize(sessions []readSession, names map[string]string) Agents {
 			st = agentDone
 		default:
 			st = agentIdle
-			a.Idle++
+		}
+		updated, _ := time.Parse(time.RFC3339Nano, s.UpdatedAt)
+		if st == agentWaiting {
+			since := updated
+			if t, err := time.Parse(time.RFC3339Nano, ny.WaitingSince); err == nil {
+				since = t
+			}
+			if now.Sub(since) < newQuestionFor {
+				a.NewQuestion = true
+			}
+		}
+		if now.Sub(updated) >= recentFor && st != agentWorking {
+			if st == agentWaiting {
+				a.LaterWaiting++
+				a.OldestWait = max(a.OldestWait, now.Sub(updated))
+			} else {
+				a.LaterIdle++
+			}
+			continue
 		}
 		label := names[s.ProjectID]
 		if label == "" {
 			label = s.Name
 		}
-		updated, _ := time.Parse(time.RFC3339Nano, s.UpdatedAt)
 		rows = append(rows, ranked{AgentRow{shortName(label), st}, updated})
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].updated.After(rows[j].updated) })

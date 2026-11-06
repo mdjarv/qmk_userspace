@@ -3,8 +3,9 @@
 //   MUSIC   album art, scrolling title and artist, spectrum, track position
 //   AGENTS  Agentique sessions, newest update first: working, waiting on you,
 //           finished and unseen, idle
-// The context picks one (an agent waiting, else music playing, else SYS). The
-// knob press overrides it until the context changes. Without host data for
+// The context picks one (music playing, else SYS); the knob press overrides it
+// until the context changes. The agent screen only comes up by knob: a new
+// question puts the asking robot in the corner of the other screens instead. Without host data for
 // HOST_TIMEOUT the cat animation shows instead.
 #include QMK_KEYBOARD_H
 #include <stdio.h>
@@ -26,7 +27,6 @@ static enum screen override_screen, override_context;
 static enum screen shown = SCREEN_SYS;
 
 static enum screen context(void) {
-    if (host_fresh(host.last_agents, AGENTS_TIMEOUT) && host.agents_waiting > 0) return SCREEN_AGENTS;
     if (host_fresh(host.last_media, MEDIA_TIMEOUT) && host.playing) return SCREEN_MUSIC;
     return SCREEN_SYS;
 }
@@ -122,43 +122,88 @@ static void render_music(void) {
     fb_tiny(buf, (FB_W - fb_tiny_width(buf)) / 2, 121, true);
 }
 
-static void render_agents(void) {
-    static const uint8_t spin[] = {'|', '/', '-', '\\'};
-    char                 buf[12];
-    uint32_t             t = timer_read32();
+// A 9x9 robot per session: a solid head with cut-out eyes and mouth, hollow
+// when idle. Working sways its antenna, finished smiles, asking has a ?,
+// idle sleeps (Z). Rows are 9 bits, leftmost pixel in bit 8.
+static const uint16_t robot_antenna[] = {0x010, 0x020, 0x010, 0x008};
+static const uint16_t robot_open[]    = {0x07C, 0x0FE, 0x092, 0x0FE, 0x0C6, 0x0FE, 0x044};
+static const uint16_t robot_smile[]   = {0x07C, 0x0FE, 0x092, 0x0FE, 0x0BA, 0x0C6, 0x044};
+static const uint16_t robot_hollow[]  = {0x07C, 0x082, 0x0AA, 0x082, 0x0BA, 0x082, 0x07C};
 
-    fb_fill(0, 0, FB_W, 9, true);
-    fb_text("AGENT", 1, 0, 1, false);
-    if (host.agent_count == 0) fb_tiny("NONE", 8, 13, true);
-    for (int i = 0; i < host.agent_count; i++) {
-        const agent_row_t *row = &host.agents[i];
-        int                y   = 12 + i * 11;
-        switch (row->state) {
-            case AGENT_WORKING:
-                fb_glyph(spin[(t / 150 + i) % 4], 0, y, 1, true);
-                break;
-            case AGENT_WAITING:
-                fb_glyph('?', 0, y, 1, true);
-                break;
-            case AGENT_DONE: // a check mark
-                fb_px(4, y + 2, true);
-                fb_px(3, y + 3, true);
-                fb_px(0, y + 4, true);
-                fb_px(2, y + 4, true);
-                fb_px(1, y + 5, true);
-                break;
-            default:
-                fb_px(2, y + 4, true);
+static void robot(int x, int y, uint8_t state, uint8_t i) {
+    const uint16_t *head = state == AGENT_DONE ? robot_smile : state == AGENT_IDLE ? robot_hollow : robot_open;
+    uint16_t        rows[9];
+    rows[0] = state == AGENT_WORKING ? robot_antenna[(timer_read32() / 500 + i) % 4] : robot_antenna[0];
+    rows[1] = 0x010;
+    for (int r = 0; r < 7; r++) rows[2 + r] = head[r];
+    for (int r = 0; r < 9; r++) {
+        for (int c = 0; c < 9; c++) {
+            if (rows[r] & (0x100 >> c)) fb_px(x + c, y + r, true);
         }
-        fb_tiny(row->name, 8, y + 1, true);
     }
-    fb_dotted(103);
-    snprintf(buf, sizeof(buf), "RUN  %u", host.agents_running);
-    fb_tiny(buf, 0, 107, true);
-    snprintf(buf, sizeof(buf), "WAIT %u", host.agents_waiting);
-    fb_tiny(buf, 0, 114, true);
-    snprintf(buf, sizeof(buf), "IDLE %u", host.agents_idle);
-    fb_tiny(buf, 0, 121, true);
+    if (state == AGENT_WAITING) fb_tiny("?", x + 9, y, true);
+    if (state == AGENT_IDLE) fb_tiny("Z", x + 9, y, true);
+}
+
+static void format_age(char *buf, size_t len, uint8_t code) {
+    if (code < 60) {
+        snprintf(buf, len, "%uM", code);
+    } else if (code < 84) {
+        snprintf(buf, len, "%uH", code - 60);
+    } else {
+        snprintf(buf, len, "%uD", code - 84);
+    }
+}
+
+static void render_agents(void) {
+    char buf[12];
+    snprintf(buf, sizeof(buf), "RUN %u", host.agents_running);
+    fb_tiny(buf, 0, 0, true);
+    snprintf(buf, sizeof(buf), "?%u", host.agents_waiting);
+    fb_tiny(buf, FB_W + 1 - fb_tiny_width(buf), 0, true);
+    fb_dotted(7);
+
+    int y = 10;
+    if (host.agent_count == 0) {
+        robot(0, y, AGENT_IDLE, 0);
+        fb_tiny("QUIET", 13, y + 2, true);
+        y += 12;
+    }
+    for (int i = 0; i < host.agent_count; i++, y += 12) {
+        const agent_row_t *row = &host.agents[i];
+        robot(0, y, row->state, i);
+        char name[5];
+        memcpy(name, row->name, 4);
+        name[4] = 0;
+        fb_tiny(name, 15, y + 2, true);
+    }
+
+    if (host.later_waiting || host.later_idle) {
+        y += 2;
+        fb_tiny("LATER", 0, y, true);
+        fb_dotted(y + 7);
+        y += 11;
+        if (host.later_waiting) {
+            robot(0, y, AGENT_WAITING, 0);
+            snprintf(buf, sizeof(buf), "%u", host.later_waiting);
+            fb_tiny(buf, 15, y + 2, true);
+            format_age(buf, sizeof(buf), host.oldest_wait);
+            fb_tiny(buf, FB_W + 1 - fb_tiny_width(buf), y + 2, true);
+            y += 12;
+        }
+        if (host.later_idle) {
+            robot(0, y, AGENT_IDLE, 0);
+            snprintf(buf, sizeof(buf), "%u", host.later_idle);
+            fb_tiny(buf, 15, y + 2, true);
+        }
+    }
+}
+
+// The asking robot in the top right corner while a question is new.
+static void render_question_mark(void) {
+    if (!host_fresh(host.last_agents, AGENTS_TIMEOUT) || !host.new_question) return;
+    fb_fill(19, 0, 13, 10, false);
+    robot(20, 0, AGENT_WAITING, 0);
 }
 
 // Over any screen while the volume is changing.
@@ -204,6 +249,7 @@ void screens_render(void) {
             default:
                 render_sys();
         }
+        if (shown != SCREEN_AGENTS) render_question_mark();
         if (host.volume != 255 && host_fresh(host.volume_changed, VOLUME_SHOW)) render_volume();
     }
     fb_flush();
