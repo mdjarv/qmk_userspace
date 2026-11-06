@@ -68,17 +68,27 @@ func TestAgentsOrderCountsAndReports(t *testing.T) {
 		SurfacesWaiting   int    `json:"surfacesWaiting"`
 		WaitingSince      string `json:"waitingSince"`
 	}{SurfacesWaiting: 1}
+	unseen := &struct {
+		UnseenCompletedAt string `json:"unseenCompletedAt"`
+		ApprovalTool      string `json:"approvalTool"`
+		Question          bool   `json:"question"`
+		SurfacesWaiting   int    `json:"surfacesWaiting"`
+		WaitingSince      string `json:"waitingSince"`
+	}{UnseenCompletedAt: "2026-11-06T09:00:00Z"}
 	sessions := []readSession{
 		{ProjectID: "p1", State: "idle", UpdatedAt: "2026-11-06T10:00:00Z"},
-		{ProjectID: "p2", State: "running"},
-		{ProjectID: "p3", State: "stopped"},
-		{ProjectID: "p4", State: "idle", NeedsYou: waiting},
-		{ProjectID: "p5", State: "idle", UpdatedAt: "2026-11-06T12:00:00Z"},
+		{ProjectID: "p2", State: "running", UpdatedAt: "2026-11-06T12:30:00.5Z"},
+		{ProjectID: "p3", State: "stopped", NeedsYou: unseen, UpdatedAt: "2026-11-06T13:00:00Z"},
+		{ProjectID: "p3", State: "done", UpdatedAt: "2026-11-06T13:00:00Z"},
+		{ProjectID: "p4", State: "idle", NeedsYou: waiting, UpdatedAt: "2026-11-03T08:00:00Z"},
+		{ProjectID: "p5", State: "idle", NeedsYou: unseen, UpdatedAt: "2026-11-06T12:30:00Z"},
 	}
-	names := map[string]string{"p1": "QMK Userspace", "p2": "The Pint", "p4": "seisiun", "p5": "terminal-drift"}
+	names := map[string]string{"p1": "QMK Userspace", "p2": "The Pint", "p3": "Agentique", "p4": "seisiun", "p5": "terminal-drift"}
 	a := summarize(sessions, names)
-	want := []AgentRow{{"SEISI", agentWaiting}, {"PINT", agentWorking}, {"TERMI", agentIdle}, {"QMK", agentIdle}}
-	if len(a.Rows) != len(want) || a.Waiting != 1 || a.Running != 1 || a.Idle != 2 {
+	// newest first whatever the state; a question from days ago sinks; stopped
+	// and done sessions stay out even with an unseen turn
+	want := []AgentRow{{"PINT", agentWorking}, {"TERMI", agentDone}, {"QMK", agentIdle}, {"SEISI", agentWaiting}}
+	if len(a.Rows) != len(want) || a.Waiting != 1 || a.Running != 1 || a.Idle != 1 {
 		t.Fatalf("summarize = %+v", a)
 	}
 	for i := range want {
@@ -91,7 +101,7 @@ func TestAgentsOrderCountsAndReports(t *testing.T) {
 		a.Rows = append(a.Rows, AgentRow{"X", agentIdle})
 	}
 	rs := a.reports()
-	if len(rs) != 2 || rs[0][1] != agentRows || rs[1][2] != 4 || rs[1][3] != 4 || string(rs[0][7:12]) != "SEISI" || rs[0][12] != agentWaiting {
+	if len(rs) != 2 || rs[0][1] != agentRows || rs[1][2] != 4 || rs[1][3] != 4 || string(rs[0][7:12]) != "PINT " || rs[0][12] != agentWorking {
 		t.Fatalf("agent reports: % x", rs)
 	}
 	if rs := (Agents{}).reports(); len(rs) != 1 || rs[0][1] != 0 {

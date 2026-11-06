@@ -158,46 +158,42 @@ func (c *agentiqueClient) loadProjects(ctx context.Context) {
 	}
 }
 
-// summarize orders sessions waiting on you first, then working, then finished
-// and unseen, then idle (most recent first), and counts them. Stopped and
-// failed sessions are left out.
+// summarize lists live sessions newest update first and counts them.
+// Stopped, failed and done (finished for good) sessions are left out, even
+// with a turn nobody looked at: Agentique keeps hundreds of those.
 func summarize(sessions []readSession, names map[string]string) Agents {
 	var a Agents
 	type ranked struct {
 		row     AgentRow
-		updated string
+		updated time.Time
 	}
 	var rows []ranked
 	for _, s := range sessions {
 		var st uint8
+		ny := s.NeedsYou
 		switch {
-		case s.NeedsYou != nil && (s.NeedsYou.ApprovalTool != "" || s.NeedsYou.Question || s.NeedsYou.SurfacesWaiting > 0 || s.NeedsYou.WaitingSince != ""):
+		case s.State != "idle" && s.State != "running" && s.State != "merging":
+			continue
+		case ny != nil && (ny.ApprovalTool != "" || ny.Question || ny.SurfacesWaiting > 0 || ny.WaitingSince != ""):
 			st = agentWaiting
 			a.Waiting++
-		case s.State == "running" || s.State == "merging":
+		case s.State != "idle":
 			st = agentWorking
 			a.Running++
-		case s.NeedsYou != nil && s.NeedsYou.UnseenCompletedAt != "":
+		case ny != nil && ny.UnseenCompletedAt != "":
 			st = agentDone
-		case s.State == "idle" || s.State == "done":
+		default:
 			st = agentIdle
 			a.Idle++
-		default:
-			continue
 		}
 		label := names[s.ProjectID]
 		if label == "" {
 			label = s.Name
 		}
-		rows = append(rows, ranked{AgentRow{shortName(label), st}, s.UpdatedAt})
+		updated, _ := time.Parse(time.RFC3339Nano, s.UpdatedAt)
+		rows = append(rows, ranked{AgentRow{shortName(label), st}, updated})
 	}
-	order := map[uint8]int{agentWaiting: 0, agentWorking: 1, agentDone: 2, agentIdle: 3}
-	sort.SliceStable(rows, func(i, j int) bool {
-		if oi, oj := order[rows[i].row.State], order[rows[j].row.State]; oi != oj {
-			return oi < oj
-		}
-		return rows[i].updated > rows[j].updated
-	})
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].updated.After(rows[j].updated) })
 	for _, r := range rows {
 		a.Rows = append(a.Rows, r.row)
 	}

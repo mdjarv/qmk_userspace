@@ -1,7 +1,8 @@
 // Left OLED screens drawn from host data (hostdata.h):
 //   SYS     line graphs of CPU, GPU, RAM, temperature and power
 //   MUSIC   album art, scrolling title and artist, spectrum, track position
-//   AGENTS  Agentique sessions: working, waiting on you, done, idle
+//   AGENTS  Agentique sessions, newest update first: working, waiting on you,
+//           finished and unseen, idle
 // The context picks one (an agent waiting, else music playing, else SYS). The
 // knob press overrides it until the context changes. Without host data for
 // HOST_TIMEOUT the cat animation shows instead.
@@ -124,8 +125,7 @@ static void render_music(void) {
 static void render_agents(void) {
     static const uint8_t spin[] = {'|', '/', '-', '\\'};
     char                 buf[12];
-    uint32_t             t     = timer_read32();
-    bool                 blink = (t / 450) % 2 == 0;
+    uint32_t             t = timer_read32();
 
     fb_fill(0, 0, FB_W, 9, true);
     fb_text("AGENT", 1, 0, 1, false);
@@ -133,14 +133,12 @@ static void render_agents(void) {
     for (int i = 0; i < host.agent_count; i++) {
         const agent_row_t *row = &host.agents[i];
         int                y   = 12 + i * 11;
-        bool               inv = row->state == AGENT_WAITING && blink;
-        if (inv) fb_fill(0, y - 1, FB_W, 9, true);
         switch (row->state) {
             case AGENT_WORKING:
                 fb_glyph(spin[(t / 150 + i) % 4], 0, y, 1, true);
                 break;
             case AGENT_WAITING:
-                fb_glyph('!', 0, y, 1, !inv);
+                fb_glyph('?', 0, y, 1, true);
                 break;
             case AGENT_DONE: // a check mark
                 fb_px(4, y + 2, true);
@@ -152,7 +150,7 @@ static void render_agents(void) {
             default:
                 fb_px(2, y + 4, true);
         }
-        fb_tiny(row->name, 8, y + 1, !inv);
+        fb_tiny(row->name, 8, y + 1, true);
     }
     fb_dotted(103);
     snprintf(buf, sizeof(buf), "RUN  %u", host.agents_running);
