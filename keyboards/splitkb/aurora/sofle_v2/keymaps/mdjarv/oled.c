@@ -6,6 +6,7 @@
 #include "layers.h"
 #include "screens.h"
 #include "hostdata.h"
+#include "game.h"
 #include "gfx/headphones.h"
 #include "gfx/amazed.h"
 
@@ -165,6 +166,13 @@ static void render_layer_state(void) {
 }
 
 static void render_slave(void) {
+    // In dungeon mode the other half sends this screen's frame (game.c).
+    const uint8_t *hud = game_hud_frame();
+    if (hud) {
+        oled_set_cursor(0, 0);
+        oled_write_raw((const char *)hud, 512);
+        return;
+    }
     // Lines 0-7: half of the animation. The headphones art's top half is the
     // notes and the head; the amazed face lives in the bottom half.
     if (get_highest_layer(layer_state | default_layer_state) == _GAME) {

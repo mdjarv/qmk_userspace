@@ -268,6 +268,9 @@ static void cast(fx detail_shift) {
         beam[y]       = last >= 0 && cell != last && dc < BEAMS_TO;
         last          = cell;
     }
+    // the floor's distance in each row below the horizon
+    static fx floor_d[VIEW_H];
+    for (int16_t y = HORIZON; y < VIEW_H; y++) floor_d[y] = divq(mulq(EYE, FOCAL), y * ONE + ONE / 2 - HORIZON * ONE);
     for (int16_t i = 0; i < DUNGEON_W; i++) {
         fx p  = mulq(PLANE, ((2 * i + 1) * ONE) / DUNGEON_W - ONE);
         fx rx = dirx * ONE + rgtx * p, ry = diry * ONE + rgty * p;
@@ -306,7 +309,7 @@ static void cast(fx detail_shift) {
                 lit        = y < HORIZON && beam[y];
             } else if (yc > bot) {
                 // the floor is dark; the stairs down show their steps
-                fx df      = divq(mulq(EYE, FOCAL), yc - HORIZON * ONE);
+                fx df      = floor_d[y];
                 fx wx      = camx + mulq(df, rx), wy = camy + mulq(df, ry);
                 surf[y][i] = SURF_FLOOR;
                 if (dg_at(wx >> 16, wy >> 16) == STAIRS) {
