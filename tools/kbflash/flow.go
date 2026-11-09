@@ -242,7 +242,7 @@ func (r *runner) build(cmdline, firmware string) error {
 	}
 	info, err := os.Stat(firmware)
 	if err != nil {
-		r.set("build", func(rw *row) { rw.state, rw.text = stateFailed, firmware + " not found" })
+		r.set("build", func(rw *row) { rw.state, rw.text = stateFailed, firmware+" not found" })
 		return err
 	}
 	detail := fmt.Sprintf("%d KB", (info.Size()+1023)/1024)
@@ -276,7 +276,7 @@ func (r *runner) flash(firmware, buildCmd string, sides []string, erase bool) (s
 		return "", err
 	}
 	r.mustMatch = true
-	return r.eachHalf("", sides, r.configIDs(), "written, verified", func(side, fid string, progress func(string, int)) error {
+	last, err := r.eachHalf("", sides, r.configIDs(), "written, verified", func(side, fid string, progress func(string, int)) error {
 		if erase {
 			if err := eraseFirmwareRegion(r.ctx, fid, progress); err != nil {
 				return err
@@ -286,6 +286,40 @@ func (r *runner) flash(firmware, buildCmd string, sides []string, erase bool) (s
 		_, err := runPicotool(r.ctx, fid, progress, "load", "-v", firmware)
 		return err
 	})
+	if err == nil {
+		sum, _ := fileSHA256(firmware)
+		recordFlashed(flashed{Firmware: firmware, SHA256: sum, Sides: sides})
+	}
+	return last, err
+}
+
+// flashed is what kbflash last put on the keyboard, kept in
+// $XDG_STATE_HOME/kbflash/flashed.json for tools that want to know which
+// firmware is running (kbscreen tags its anomaly log with it).
+type flashed struct {
+	At       string   `json:"at"`
+	Firmware string   `json:"firmware"` // the .uf2 flashed, or the backup directory restored
+	SHA256   string   `json:"sha256,omitempty"`
+	Sides    []string `json:"sides"`
+}
+
+func flashedPath() string {
+	dir := os.Getenv("XDG_STATE_HOME")
+	if dir == "" {
+		home, _ := os.UserHomeDir()
+		dir = filepath.Join(home, ".local/state")
+	}
+	return filepath.Join(dir, "kbflash", "flashed.json")
+}
+
+// recordFlashed is best effort: a flash that worked is not failed over a note.
+func recordFlashed(f flashed) {
+	f.At = time.Now().Format(time.RFC3339)
+	b, _ := json.MarshalIndent(f, "", "  ")
+	path := flashedPath()
+	if os.MkdirAll(filepath.Dir(path), 0o755) == nil {
+		os.WriteFile(path, append(b, '\n'), 0o644)
+	}
 }
 
 type manifest struct {
@@ -378,7 +412,7 @@ func (r *runner) restore(dir, prefix string, sides []string) (string, error) {
 		return "", err
 	}
 	defer os.RemoveAll(tmp)
-	return r.eachHalf(prefix, sides, ids, "restored, verified", func(side, fid string, progress func(string, int)) error {
+	last, err := r.eachHalf(prefix, sides, ids, "restored, verified", func(side, fid string, progress func(string, int)) error {
 		sparse := filepath.Join(tmp, side+".uf2")
 		if _, err := sparseUF2(filepath.Join(dir, m.Sides[side].File), sparse); err != nil {
 			return err
@@ -390,6 +424,10 @@ func (r *runner) restore(dir, prefix string, sides []string) (string, error) {
 		_, err := runPicotool(r.ctx, fid, progress, "load", "-v", sparse)
 		return err
 	})
+	if err == nil {
+		recordFlashed(flashed{Firmware: dir, SHA256: m.Sides[sides[0]].SHA256, Sides: sides})
+	}
+	return last, err
 }
 
 // latestBackup is the newest backup directory, offered as the way back on failure.

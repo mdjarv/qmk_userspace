@@ -37,6 +37,5 @@ New pages and changes to them never need a flash: they are JavaScript in `tools/
 
 ## Open threads
 
-- Double taps (2026-10-21): debounce changed to `asym_eager_defer_pk` 10 ms without measuring. If they persist, measure first: log same-key re-presses within 50 ms of release from this keyboard's input device.
-- Volume sometimes jumps to max (2026-10-21): not investigated; seen on the old Vial firmware. Same logger idea: count volume-up bursts from this keyboard to tell the encoder from the host. The left OLED now shows the volume for 1.5 s after every change, which may show when it happens.
+- Double taps and volume jumping to max (2026-10-21; debounce changed to `asym_eager_defer_pk` 10 ms without measuring): since 2026-11-09 kbscreen logs both to `~/.local/state/kbscreen/anomalies.log` (`input.go`: a key pressed again within 50 ms of its release, 8+ volume steps within 200 ms), one line per anomaly, tagged with the firmware kbflash last flashed (`~/.local/state/kbflash/flashed.json`). It needs the input line of `70-kbscreen.rules` installed. Close the thread when the log names a cause, or after 7 days with nothing (2026-11-16). The log cannot prove the debounce change helped: nothing was measured before it.
 - OLED idle blanking (60 s, both halves) not explicitly confirmed on hardware; since 2026-11-06 kbscreen can also hold both screens on (keep-awake while music plays).

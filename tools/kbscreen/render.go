@@ -364,6 +364,7 @@ type jsSys struct {
 	Battery      int     `json:"battery"`      // percent
 	BatteryState string  `json:"batteryState"` // charging, discharging, hidden
 	Clock        string  `json:"clock"`        // 14:53
+	Date         string  `json:"date"`         // 2026-11-09
 }
 
 type jsMedia struct {
@@ -452,7 +453,7 @@ func toJS(sys Sys, cpuHist, gpuHist []uint8, m Media, a *Agents, now time.Time) 
 			CPU: int(sys.CPU), GPU: int(sys.GPU), CPUHistory: ints(cpuHist), GPUHistory: ints(gpuHist),
 			RAMUsed: sys.RAMUsed, RAMTotal: sys.RAMTotal, VRAMUsed: sys.VRAMUsed, VRAMTotal: sys.VRAMTotal,
 			Battery: int(sys.Battery), BatteryState: batteryNames[min(int(sys.BatteryState), len(batteryNames)-1)],
-			Clock: now.Format("15:04"),
+			Clock: now.Format("15:04"), Date: now.Format("2006-01-02"),
 		},
 		Media: jsMedia{
 			Playing: m.Playing, Title: asciiOnly(m.Title), Artist: asciiOnly(m.Artist),

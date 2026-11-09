@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -124,6 +125,7 @@ func sampleUF2() []byte {
 
 func TestDrillRestoresEachImageToItsOwnHalf(t *testing.T) {
 	// backup left, right; restore starts right; the left half is tapped twice
+	t.Setenv("XDG_STATE_HOME", t.TempDir())
 	k := newFakeKeyboard(t, "AAAA", "BBBB", "BBBB", "BBBB", "AAAA")
 	r, out := newRunner(t, k)
 	dir, _, err := r.backup(t.TempDir(), "drill", "save", []string{"left", "right"})
@@ -143,6 +145,11 @@ func TestDrillRestoresEachImageToItsOwnHalf(t *testing.T) {
 		if !strings.Contains(calls, want) {
 			t.Errorf("picotool never called with %q\ncalls:\n%s", want, calls)
 		}
+	}
+	// what was put on the keyboard is noted for other tools
+	var f flashed
+	if b, err := os.ReadFile(flashedPath()); err != nil || json.Unmarshal(b, &f) != nil || f.Firmware != dir || len(f.Sides) != 2 {
+		t.Errorf("flashed.json = %+v, %v", f, err)
 	}
 	if !strings.Contains(out.String(), "RIGHT was already done, rebooted it unchanged") {
 		t.Errorf("repeat tap on a finished half not reported:\n%s", out.String())

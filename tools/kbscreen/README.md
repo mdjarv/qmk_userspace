@@ -37,7 +37,7 @@ Files load in this order, into one global scope:
 
 | Field | |
 |---|---|
-| `d.sys` | `cpu`, `gpu` (percent), `cpuHistory`, `gpuHistory` (last 32 s, oldest first), `ramUsed`, `ramTotal`, `vramUsed`, `vramTotal` (GiB; VRAM includes GTT spill), `battery` (percent), `batteryState` (`charging`, `discharging`, `hidden`), `clock` (`14:53`) |
+| `d.sys` | `cpu`, `gpu` (percent), `cpuHistory`, `gpuHistory` (last 32 s, oldest first), `ramUsed`, `ramTotal`, `vramUsed`, `vramTotal` (GiB; VRAM includes GTT spill), `battery` (percent), `batteryState` (`charging`, `discharging`, `hidden`), `clock` (`14:53`), `date` (`2026-11-09`) |
 | `d.media` | `playing`, `title`, `artist` (ASCII), `position`, `length` (s), `volume` (percent, -1 unknown), `muted`, `volumeChangedAgo` (ms, -1 never), `art` (128 bytes, 32x32 in OLED layout), `bands` (10 spectrum bands 0..255) |
 | `d.weather` | `null` without a place or until the first answer; else `sky` (`clear`, `cloud`, `fog`, `rain`, `snow`, `storm`), `code` (WMO), `temp` (°C), `wind` (km/h), `day`, `sunrise`, `sunset` (`07:22`) |
 | `d.keyboard` | `null` until the keyboard reports; else `layer` (`base`, `game`, `lower`, `raise`), `ctrl`, `shift`, `alt`, `gui` |
@@ -59,7 +59,7 @@ Files load in this order, into one global scope:
 
 ## Setup
 
-1. Keyboard access (once): `sudo install -m644 70-kbscreen.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger`
+1. Keyboard access (once; the rule also lets the anomaly log read the keyboard's own input devices, and no others): `sudo install -m644 70-kbscreen.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger`
 2. Agent board (optional): mint a read token on the machine running Agentique, `agentique tokens add kbscreen --perm read --expires 365d`, and put it in `~/.config/kbscreen/config.toml` (mode 600):
    ```toml
    [agentique]

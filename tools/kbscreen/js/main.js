@@ -6,7 +6,7 @@
 // one running.
 //
 // A council at work or with an answer waiting shows the council, otherwise
-// the farm and the fishing page take turns. Music is only a knob press away:
+// the page on trial this week (see TRIAL). Music is only a knob press away:
 // coming up by itself when a track started was annoying. A
 // knob press shows the next page until that choice changes, a double press the
 // previous one, a long press goes back to the automatic choice. The screens stay on while music plays,
@@ -16,9 +16,16 @@
 let shown = null, override = null, overrideContext = null, lastData = null;
 
 const has = name => PAGES.some(p => p.name === name);
-// The farm and the fishing page take turns, ten minutes each.
-const ROTATION = ['farm', 'fishing'], TURN_MS = 10 * 60000;
-let now = 0;
+// The judging week (a council, 2026-11-09): each page alone long enough to
+// learn it by heart, the farm through the 11th, fishing from the 12th to the
+// 14th, a verdict on the 15th and the losing page deleted. Swapping every ten
+// minutes taught neither. Until the verdict, the farm.
+const TRIAL = [['2026-11-12', 'fishing'], ['2026-11-15', 'farm']];
+function onTrial(d) {
+  let page = 'farm';
+  TRIAL.forEach(([from, name]) => { if (d.sys.date >= from) page = name; });
+  return page;
+}
 // A live council debating, writing its brief, with an answer not yet handed
 // over, or moved in the last five minutes (just started, or between rounds);
 // not one idle since its answer was handed over.
@@ -31,8 +38,9 @@ const councilBusy = d => (d.councils || []).some(c => {
 });
 function context(d) {
   if (councilBusy(d) && has('council')) return 'council';
-  const turns = ROTATION.filter(has);
-  if (turns.length) return turns[Math.floor(now / TURN_MS) % turns.length];
+  const trial = onTrial(d);
+  if (has(trial)) return trial;
+  if (has('farm')) return 'farm';
   return has('perf') ? 'perf' : PAGES[0].name;
 }
 
@@ -80,7 +88,7 @@ function volume(m) {
 }
 
 function render(d, t) {
-  lastData = d; now = t;
+  lastData = d;
   const ctx = context(d);
   if (override && (ctx !== overrideContext || !has(override))) override = null;
   shown = override || ctx;

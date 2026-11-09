@@ -97,6 +97,7 @@ func main() {
 	if c := agentiqueFromConfig(*config, filepath.Join(home, ".config/agentique")); c != nil {
 		go pollAgents(ctx, st, c)
 	}
+	go watchInput(ctx, filepath.Join(stateDir, "kbscreen/anomalies.log"), stateDir)
 	if lat, lon, ok := weatherPlace(*config); ok {
 		go pollWeather(ctx, st, lat, lon)
 	}

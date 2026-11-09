@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/binary"
 	"image"
 	"image/color"
 	"math"
@@ -10,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -258,5 +261,60 @@ func TestWeatherFromOpenMeteo(t *testing.T) {
 		if skyOf(code) != sky {
 			t.Fatalf("skyOf(%d) = %s, want %s", code, skyOf(code), sky)
 		}
+	}
+}
+
+// The anomaly log finds the keyboard's input devices in sysfs and reports a
+// key pressed again within 50 ms of its release, and a burst of volume steps
+// once, but not ordinary typing.
+func TestInputAnomalies(t *testing.T) {
+	sys := t.TempDir()
+	for node, id := range map[string][2]string{"event5": {"8d1d", "ec32"}, "event6": {"046d", "c52b"}} {
+		write(t, filepath.Join(sys, "class/input", node, "device/id/vendor"), []byte(id[0]+"\n"))
+		write(t, filepath.Join(sys, "class/input", node, "device/id/product"), []byte(id[1]+"\n"))
+	}
+	if n := keyboardEventNodes(sys); len(n) != 1 || n[0] != "/dev/input/event5" {
+		t.Fatalf("nodes = %v", n)
+	}
+
+	var buf bytes.Buffer
+	t0 := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	ev := func(ms int, code uint16, value int32) {
+		at := t0.Add(time.Duration(ms) * time.Millisecond)
+		var b [inputEvtSize]byte
+		binary.LittleEndian.PutUint64(b[0:], uint64(at.Unix()))
+		binary.LittleEndian.PutUint64(b[8:], uint64(at.Nanosecond()/1000))
+		binary.LittleEndian.PutUint16(b[16:], evKey)
+		binary.LittleEndian.PutUint16(b[18:], code)
+		binary.LittleEndian.PutUint32(b[20:], uint32(value))
+		buf.Write(b[:])
+	}
+	ev(0, 18, 1) // E
+	ev(80, 18, 0)
+	ev(110, 18, 1) // again 30 ms after release: a bounce
+	ev(150, 18, 0)
+	ev(300, 18, 1) // 150 ms later: typing "ee"
+	ev(340, 18, 0)
+	for i := range 10 { // ten volume-up steps 15 ms apart: one burst
+		ev(1000+i*15, keyVolumeUp, 1)
+		ev(1005+i*15, keyVolumeUp, 0)
+	}
+	for i := range 5 { // a hand turning the knob
+		ev(3000+i*80, keyVolumeUp, 1)
+		ev(3010+i*80, keyVolumeUp, 0)
+	}
+	var got []string
+	a := newAnomalies()
+	for {
+		e, err := readInputEvent(&buf)
+		if err != nil {
+			break
+		}
+		if what := a.see(e); what != "" {
+			got = append(got, what)
+		}
+	}
+	if len(got) != 2 || got[0] != "bounce E pressed again 30 ms after release" || !strings.HasPrefix(got[1], "burst VOLUMEUP: 8 steps") {
+		t.Fatalf("anomalies = %q", got)
 	}
 }

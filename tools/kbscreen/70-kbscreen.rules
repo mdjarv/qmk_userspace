@@ -1,2 +1,5 @@
 # Lets the logged-in user write to the Sofle's Raw HID interface (kbscreen).
 KERNEL=="hidraw*", SUBSYSTEM=="hidraw", ATTRS{idVendor}=="8d1d", ATTRS{idProduct}=="ec32", TAG+="uaccess"
+# Lets it read the Sofle's own input devices, and no others, for the anomaly
+# log (key bounce, volume bursts).
+KERNEL=="event*", SUBSYSTEM=="input", ATTRS{idVendor}=="8d1d", ATTRS{idProduct}=="ec32", TAG+="uaccess"
