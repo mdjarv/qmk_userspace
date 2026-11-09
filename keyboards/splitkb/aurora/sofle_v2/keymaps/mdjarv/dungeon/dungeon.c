@@ -192,15 +192,17 @@ static void new_floor(uint32_t now) {
     }
     look();
     dg.floor_at = now;
+    dg.floors++;
     dg.version++;
 }
 
 void dungeon_start(uint32_t seed, uint32_t now_ms) {
     uint8_t  best = dg.best;
-    uint32_t version = dg.version;
+    uint32_t version = dg.version, floors = dg.floors;
     memset(&dg, 0, sizeof(dg));
     dg.best    = best;
     dg.version = version + 1;
+    dg.floors  = floors;
     dg.rng     = seed ? seed : 1;
     dg.hp      = MAX_HP;
     dg.attack  = 1;

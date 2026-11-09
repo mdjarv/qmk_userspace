@@ -100,3 +100,33 @@ func TestDrinkingFromTheInventory(t *testing.T) {
 		t.Fatal("drinking the potion changed neither health nor the potion count")
 	}
 }
+
+// The keyboard draws the view in slices between its other work (render does
+// too); the result must be the frame a one-pass render gives.
+func TestSlicedDrawingMatchesAWholeRender(t *testing.T) {
+	start(9, 0)
+	put(1, 'k') // something for the monster step to draw
+	for i, k := range []string{"w", "q", "w", "space", "e"} {
+		now := uint32(1000 * (i + 1))
+		press(buttons[k], now)
+		sliced := render(now + 500)
+		if whole := renderWhole(now + 500); !bytes.Equal(sliced, whole) {
+			t.Fatalf("after %q, drawing in slices gave another frame than drawing whole", k)
+		}
+	}
+}
+
+// A new game shows its own start at once, not a glide from where the last
+// game's view was, even when both start at the same moment.
+func TestANewGameDoesNotGlideFromTheLastOne(t *testing.T) {
+	start(7, 0)
+	first := render(0)
+	press(buttons["q"], 10)
+	if bytes.Equal(render(1000), first) {
+		t.Fatal("bad fixture: turning does not change the view")
+	}
+	start(7, 0)
+	if !bytes.Equal(render(0), first) {
+		t.Fatal("the new game's first frame is not its start")
+	}
+}

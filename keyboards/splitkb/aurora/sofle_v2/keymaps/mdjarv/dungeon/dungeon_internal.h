@@ -47,6 +47,7 @@ typedef struct {
     bool      dead;
     uint32_t  turn;
     uint32_t  version; // changes with anything the screens show
+    uint32_t  floors;  // counts floors entered, across games: a new one means the view jumps
     monster_t mon[MAX_MONSTERS];
     uint8_t   nmon;
     item_t    item[MAX_ITEMS];

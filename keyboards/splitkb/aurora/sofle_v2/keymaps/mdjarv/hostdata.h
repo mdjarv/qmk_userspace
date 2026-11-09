@@ -27,11 +27,12 @@ enum host_event_kind {
     HOST_EVENT_STATE       = 2, // [2] highest layer  [3] mods (QMK's 8 mod bits); on change and once a second
     HOST_EVENT_KNOB_LONG   = 3, // held for KNOB_LONG_MS
     HOST_EVENT_KNOB_DOUBLE = 4, // pressed twice within KNOB_DOUBLE_MS
-    // Once a second in dungeon mode, for kbscreen's log (game.c): [2..3] slowest
-    // render us  [4..5] mean render us  [6] renders  [7..8] main loops  [9..10]
-    // split transfers sent  [11..12] failed  [13] chunks the other half has
-    // received (mod 256)  [14] whether it shows them  [15..16] the slowest
-    // failed transfer in us. Numbers little-endian.
+    // Once a second in dungeon mode, for kbscreen's log (game.c). Numbers are
+    // little-endian u16 unless marked: [2] slowest drawing step us  [4] mean
+    // step us  [6] views finished (u8)  [7] main loops  [9] split transfers
+    // sent  [11] failed  [13] messages the other half has had (u8, mod 256)
+    // [14] whether it shows the game (u8)  [15] slowest failed transfer us
+    // [17] slowest compose us.
     HOST_EVENT_DUNGEON = 5,
 };
 

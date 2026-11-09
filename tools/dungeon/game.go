@@ -33,10 +33,21 @@ func render(now uint32) []byte {
 	return f
 }
 
-// renderHUD returns the right screen's frame.
+// renderHUD returns the right screen's frame, drawn as the keyboard's other
+// half draws it: from the packed state, not from the game.
 func renderHUD(now uint32) []byte {
+	st := make([]byte, C.DUNGEON_HUD_STATE)
+	C.dungeon_hud_state((*C.uint8_t)(unsafe.Pointer(&st[0])))
 	f := make([]byte, frameSize)
-	C.dungeon_render_hud((*C.uint8_t)(unsafe.Pointer(&f[0])), C.uint32_t(now))
+	C.dungeon_render_hud((*C.uint8_t)(unsafe.Pointer(&st[0])), (*C.uint8_t)(unsafe.Pointer(&f[0])))
+	return f
+}
+
+// renderWhole draws the left screen's view in one pass, without the slicing
+// the keyboard (and render) use: the reference the slices must add up to.
+func renderWhole(now uint32) []byte {
+	f := make([]byte, frameSize)
+	C.dungeon_sim_render_whole((*C.uint8_t)(unsafe.Pointer(&f[0])), C.uint32_t(now))
 	return f
 }
 

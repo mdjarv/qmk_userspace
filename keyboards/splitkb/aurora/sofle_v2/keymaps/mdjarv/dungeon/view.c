@@ -276,10 +276,16 @@ static int8_t wall_texel(uint8_t t, int8_t mx, int8_t my, fx u, fx v) {
     return ((bu & 0xFFFF) < Q(0.16) || (v2 & 0xFFFF) < Q(0.16)) ? -1 : 0;
 }
 
-static void cast(fx detail_shift) {
-    // ceiling beams: a line where the ceiling's distance crosses into the next cell
-    static bool beam[HORIZON];
-    int32_t     last = -1;
+// Rows of the ceiling with a beam (where its distance crosses into the next
+// cell), and the floor's distance in each row: fixed, so worked out once.
+static bool beam[HORIZON];
+static fx   floor_d[VIEW_H];
+
+static void tables(void) {
+    static bool done;
+    if (done) return;
+    done         = true;
+    int32_t last = -1;
     for (int16_t y = 0; y < HORIZON && y < VIEW_H; y++) {
         fx      above = HORIZON * ONE - (y * ONE + ONE / 2);
         fx      dc    = divq(mulq(WALL_H - EYE, FOCAL), above);
@@ -287,10 +293,12 @@ static void cast(fx detail_shift) {
         beam[y]       = last >= 0 && cell != last && dc < BEAMS_TO;
         last          = cell;
     }
-    // the floor's distance in each row below the horizon
-    static fx floor_d[VIEW_H];
     for (int16_t y = HORIZON; y < VIEW_H; y++) floor_d[y] = divq(mulq(EYE, FOCAL), y * ONE + ONE / 2 - HORIZON * ONE);
-    for (int16_t i = 0; i < DUNGEON_W; i++) {
+}
+
+// One column of the view: walls, floor and ceiling.
+static void cast_column(int16_t i, fx detail_shift) {
+    {
         fx p  = mulq(PLANE, ((2 * i + 1) * ONE) / DUNGEON_W - ONE);
         fx rx = cdx + mulq(crx, p), ry = cdy + mulq(cry, p);
         // walk the grid (DDA) to the first wall or door
@@ -349,8 +357,12 @@ static void cast(fx detail_shift) {
             dg_px(i, y, lit);
         }
     }
-    // edges: where a wall (or the stairs) meets anything else
-    for (int16_t y = 0; y < VIEW_H; y++)
+}
+
+// Edges for rows y0 to y1: where a wall (or the stairs) meets anything else.
+// Needs every column cast first.
+static void edges(int16_t y0, int16_t y1) {
+    for (int16_t y = y0; y < y1 && y < VIEW_H; y++)
         for (int16_t x = 0; x < DUNGEON_W; x++) {
             uint16_t s = surf[y][x];
             uint16_t r = x + 1 < DUNGEON_W ? surf[y][x + 1] : s, b = y + 1 < VIEW_H ? surf[y + 1][x] : s;
@@ -403,12 +415,15 @@ static bool billboard(const char *const *rows, uint8_t h, uint8_t cx, uint8_t cy
     return true;
 }
 
-static void things(uint32_t now) {
-    // far to near, so nearer things cover farther ones
-    struct drawable {
-        fx     ty;
-        int8_t mon, item;
-    } order[MAX_MONSTERS + MAX_ITEMS];
+// Monsters and items, far to near so nearer ones cover farther ones: sorted
+// once per view (things_begin), then drawn one per step (thing).
+static struct drawable {
+    fx     ty;
+    int8_t mon, item;
+} order[MAX_MONSTERS + MAX_ITEMS];
+static uint8_t things_n;
+
+static void things_begin(void) {
     uint8_t n = 0;
     for (uint8_t k = 0; k < dg.nmon; k++) {
         fx dx = dg.mon[k].x * ONE - (camx - ONE / 2), dy = dg.mon[k].y * ONE - (camy - ONE / 2);
@@ -424,8 +439,14 @@ static void things(uint32_t now) {
             order[b]           = order[b - 1];
             order[b - 1]       = t;
         }
-    front_x = -1;
-    for (uint8_t k = 0; k < n; k++) {
+    things_n = n;
+    front_x  = -1;
+}
+
+static void thing(uint8_t k, uint32_t now) {
+    // a key pressed between steps may have removed it since the sort
+    if (order[k].mon >= dg.nmon || order[k].item >= dg.nitem) return;
+    {
         if (order[k].mon >= 0) {
             monster_t *m    = &dg.mon[order[k].mon];
             fx         bob  = m->kind == BAT && (now / 250 + m->x) % 2 ? Q(0.06) : 0;
@@ -557,13 +578,15 @@ static void look_along(int16_t angle) {
 // Sets the eye for this moment; returns whether it is still gliding.
 static bool place_eye(uint32_t now) {
     pose_t to = {dg.x * ONE + ONE / 2 - DX[dg.dir] * BACK, dg.y * ONE + ONE / 2 - DY[dg.dir] * BACK, (int16_t)(dg.dir * 32)};
-    if (to.x != pose_to.x || to.y != pose_to.y || to.angle != pose_to.angle || dg.floor_at != pose_floor) {
+    if (to.x != pose_to.x || to.y != pose_to.y || to.angle != pose_to.angle || dg.floors != pose_floor) {
         fx   far  = (to.x > eye.x ? to.x - eye.x : eye.x - to.x) + (to.y > eye.y ? to.y - eye.y : eye.y - to.y);
-        bool jump = dg.floor_at != pose_floor || far > Q(1.5); // a new floor or game: no glide
+        // no glide to a new floor or game, nor when this is drawn too long
+        // after the key to show one
+        bool jump  = dg.floors != pose_floor || far > Q(1.5) || now - dg.pressed_at >= GLIDE_MS;
         pose_from  = jump ? to : eye; // from wherever the eye is now, mid-glide or not
         pose_to    = to;
-        pose_floor = dg.floor_at;
-        glide_at   = now - dg.pressed_at < GLIDE_MS ? dg.pressed_at : now; // from the key press, not from when this got drawn
+        pose_floor = dg.floors;
+        glide_at   = dg.pressed_at; // from the key press, not from when this got drawn
     }
     dirx = DX[dg.dir], diry = DY[dg.dir];
     rgtx = DX[(dg.dir + 1) % 4], rgty = DY[(dg.dir + 1) % 4];
@@ -593,30 +616,79 @@ static void shake(int8_t by) {
     }
 }
 
-void dungeon_render(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms) {
-    static uint8_t  view[DUNGEON_FRAME_SIZE];
-    static uint32_t cached_version = UINT32_MAX, cached_tick = UINT32_MAX;
-    uint32_t        tick = now_ms / 250;
+// ------------------------------------------------------------------ the pipeline
+
+// The view is worked out in slices, one per dungeon_render_step, into a back
+// buffer that becomes the shown view when it is complete. The eye's place is
+// fixed for the whole view at its start.
+#define CAST_COLS 4  // columns per step
+#define EDGE_ROWS 30 // rows of edges per step
+static uint8_t view[DUNGEON_FRAME_SIZE], back[DUNGEON_FRAME_SIZE];
+static enum { IDLE, CASTING, EDGING, THINGS } phase;
+static int16_t  step_at;
+static uint32_t view_time, view_version = UINT32_MAX, view_tick = UINT32_MAX;
+static fx       view_flicker;
+static bool     view_glided;
+
+// Starts a view: a new one when the game changed, while the eye glides (and
+// once after, for where it stopped), and four times a second for the torch.
+// Returns false when the shown one is still right (unless forced).
+static bool start_view(uint32_t now_ms, bool force) {
+    uint32_t tick    = now_ms / 250;
+    bool     gliding = place_eye(now_ms);
+    if (!force && !gliding && !view_glided && dg.version == view_version && tick == view_tick) return false;
+    tables();
+    view_version = dg.version;
+    view_tick    = tick;
+    view_glided  = gliding;
+    view_time    = now_ms;
+    // the torchlight breathes: how far the joints show moves a little
+    view_flicker = (fx)((tick * 2654435761u) >> 30) * Q(0.12);
+    memset(back, 0, sizeof(back));
+    return true;
+}
+
+bool dungeon_render_step(uint32_t now_ms) {
+    if (dg.dead) return false;
+    dg_fb = back;
+    switch (phase) {
+        case IDLE:
+            if (start_view(now_ms, false)) phase = CASTING, step_at = 0;
+            return false;
+        case CASTING:
+            for (uint8_t k = 0; k < CAST_COLS && step_at < DUNGEON_W; k++) cast_column(step_at++, view_flicker);
+            if (step_at == DUNGEON_W) phase = EDGING, step_at = 0;
+            return false;
+        case EDGING:
+            edges(step_at, step_at + EDGE_ROWS);
+            step_at += EDGE_ROWS;
+            if (step_at >= VIEW_H) {
+                things_begin();
+                phase   = THINGS;
+                step_at = 0;
+            }
+            return false;
+        case THINGS:
+            if (step_at < things_n) {
+                thing(step_at++, view_time);
+                return false;
+            }
+            memcpy(view, back, sizeof(view));
+            phase = IDLE;
+            return true;
+    }
+    return false;
+}
+
+void dungeon_compose(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms) {
+    dg_fb = frame;
     if (dg.dead) {
-        dg_fb = frame;
         memset(frame, 0, DUNGEON_FRAME_SIZE);
         dead();
         bars();
         return;
     }
-    bool gliding = place_eye(now_ms);
-    if (gliding || dg.version != cached_version || tick != cached_tick) {
-        cached_version = gliding ? UINT32_MAX : dg.version;
-        cached_tick    = tick;
-        dg_fb          = view;
-        memset(view, 0, sizeof(view));
-        // the torchlight breathes: how far the joints show moves a little
-        fx flicker = (fx)((tick * 2654435761u) >> 30) * Q(0.12);
-        cast(flicker);
-        things(now_ms);
-    }
     memcpy(frame, view, DUNGEON_FRAME_SIZE);
-    dg_fb = frame;
     if (dg.hurt && now_ms - dg.hurt_at < 240) shake((now_ms - dg.hurt_at) / 60 % 2 ? 1 : -1);
     if (dg.hit && now_ms - dg.hit_at < 200 && front_x >= 0) {
         dg_sprite_ring(STAR, 5, front_x + 2, front_y);
@@ -627,3 +699,27 @@ void dungeon_render(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms) {
     if (dg.menu) inspect();
     bars();
 }
+
+void dungeon_render(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms) {
+    do dungeon_render_step(now_ms);
+    while (phase != IDLE);
+    dungeon_compose(frame, now_ms);
+}
+
+#ifdef DUNGEON_SIM
+// The view in one pass from the same parts, without the pipeline's slicing:
+// the simulator's tests check that the slices add up to this.
+void dungeon_sim_render_whole(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms) {
+    phase = IDLE;
+    if (!dg.dead) {
+        dg_fb = back;
+        start_view(now_ms, true);
+        for (int16_t i = 0; i < DUNGEON_W; i++) cast_column(i, view_flicker);
+        edges(0, VIEW_H);
+        things_begin();
+        for (uint8_t k = 0; k < things_n; k++) thing(k, view_time);
+        memcpy(view, back, sizeof(view));
+    }
+    dungeon_compose(frame, now_ms);
+}
+#endif
