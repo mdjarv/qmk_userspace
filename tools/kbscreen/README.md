@@ -26,7 +26,7 @@ Files load in this order, into one global scope:
     };
   })());
   ```
-- `main.js` also has `showPage(name)`, which shows a page as a knob press would.
+- `main.js` also has `showPage(name)`, which shows a page as a knob press would, and `pageState()`/`pick(name)` for the preview's page picker (Auto or one page; only the shown page's actions are listed).
 - `main.js`: `render(d, t)` (picks the page, sets `display`, draws the volume readout over any page, returns `f.buf`) and `knob(kind)`, called with `"press"`, `"double"` (twice within 250 ms) or `"long"` (held 500 ms). A single press arrives 250 ms late, once the keyboard knows it was not a double. `context(d)` there decides which page comes up by itself.
 - `save`: an object the pages keep game state in (counters, crops). kbscreen hands it to every fresh runtime on reload and writes it to `~/.local/state/kbscreen/save.json` (`-save`) every 10 s and on exit; a file that is not JSON is moved to `save.json.bad`. Keep it plain JSON and small.
 - `display`: set `display.brightness` (0..255, the left OLED) and `display.keepAwake` (both OLEDs stay on past the 60 s idle blanking while true); kbscreen sends them on.

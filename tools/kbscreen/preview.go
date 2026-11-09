@@ -23,7 +23,15 @@ type previewServer struct {
 	frame   []byte
 	err     string
 	actions []string
-	run     chan string // actions asked for, for the render loop
+	pages   pageView
+	run     chan previewRequest // what the buttons asked for, for the render loop
+}
+
+// previewRequest is a button press: an action by name, or (pick) a page to
+// show, "" for the automatic one.
+type previewRequest struct {
+	name string
+	pick bool
 }
 
 func startPreview(ctx context.Context, addr string) (*previewServer, error) {
@@ -31,7 +39,7 @@ func startPreview(ctx context.Context, addr string) (*previewServer, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &previewServer{run: make(chan string, 8)}
+	p := &previewServer{run: make(chan previewRequest, 8)}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/actions", func(w http.ResponseWriter, _ *http.Request) {
 		p.mu.Lock()
@@ -39,20 +47,31 @@ func startPreview(ctx context.Context, addr string) (*previewServer, error) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(p.actions)
 	})
-	// POST /action?name=...: from this page only (a browser's cross-site
-	// POST carries another Origin).
-	mux.HandleFunc("/action", func(w http.ResponseWriter, r *http.Request) {
-		if o := r.Header.Get("Origin"); r.Method != http.MethodPost || (o != "" && o != "http://"+r.Host) {
-			http.Error(w, "POST from the preview page", http.StatusForbidden)
-			return
-		}
-		select {
-		case p.run <- r.URL.Query().Get("name"):
-			w.WriteHeader(http.StatusAccepted)
-		default:
-			http.Error(w, "busy", http.StatusServiceUnavailable)
-		}
+	mux.HandleFunc("/pages", func(w http.ResponseWriter, _ *http.Request) {
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(p.pages)
 	})
+	// POST /action?name=... runs an action, POST /show?page=... shows a page
+	// ("" the automatic one): from this page only (a browser's cross-site
+	// POST carries another Origin).
+	post := func(pick bool, param string) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			if o := r.Header.Get("Origin"); r.Method != http.MethodPost || (o != "" && o != "http://"+r.Host) {
+				http.Error(w, "POST from the preview page", http.StatusForbidden)
+				return
+			}
+			select {
+			case p.run <- previewRequest{name: r.URL.Query().Get(param), pick: pick}:
+				w.WriteHeader(http.StatusAccepted)
+			default:
+				http.Error(w, "busy", http.StatusServiceUnavailable)
+			}
+		}
+	}
+	mux.HandleFunc("/action", post(false, "name"))
+	mux.HandleFunc("/show", post(true, "page"))
 	mux.HandleFunc("/", p.page)
 	mux.HandleFunc("/frame.png", p.png)
 	mux.HandleFunc("/error", func(w http.ResponseWriter, _ *http.Request) {
@@ -76,6 +95,15 @@ func (p *previewServer) setFrame(f []byte) {
 	p.mu.Unlock()
 }
 
+func (p *previewServer) setPages(v pageView) {
+	if p == nil {
+		return
+	}
+	p.mu.Lock()
+	p.pages = v
+	p.mu.Unlock()
+}
+
 func (p *previewServer) setActions(names []string) {
 	if p == nil {
 		return
@@ -87,7 +115,7 @@ func (p *previewServer) setActions(names []string) {
 
 // requests is where the render loop takes the actions asked for; nil (never
 // ready) without a preview.
-func (p *previewServer) requests() <-chan string {
+func (p *previewServer) requests() <-chan previewRequest {
 	if p == nil {
 		return nil
 	}
@@ -111,9 +139,10 @@ func (p *previewServer) page(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte(previewHTML))
 }
 
-// The preview: the frame on the left; on the right the actions the pages
-// offer, grouped by page and section ('page/section: label'), each page's
-// own reset beside its name and the reset of everything on top.
+// The preview: the frame on the left; on the right a page picker (automatic
+// or one page, as the knob would), the reset of everything, and the actions
+// the shown page offers, by section ('page/section: label'), with the page's
+// own reset beside its name.
 const previewHTML = `<!doctype html><meta charset=utf-8><title>kbscreen</title>
 <style>
 :root{--bg:#121212;--fg:#e8e8e8;--muted:#9a9a9a;--faint:#666;--btn:#1e1e1e;--line:#333;--hover:#2a2a2a;--ok:#4caf7a}
@@ -135,19 +164,37 @@ section h2 a:hover{color:var(--fg)}
 .row div{display:flex;flex-wrap:wrap;gap:6px}
 #a{display:flex;flex-direction:column;gap:24px}
 #e{color:#f77;white-space:pre-wrap;margin:0}
+#pg{display:flex;flex-wrap:wrap;gap:6px}
+#pg button[aria-pressed=true]{background:var(--fg);color:var(--bg);border-color:var(--fg)}
+#pg button.auto{border-color:var(--muted)}
+#none{color:var(--faint);margin:0}
 </style>
 <img id=f src=frame.png>
 <main>
+<nav id=pg aria-label=Page></nav>
 <div id=top><button id=reset hidden>Reset to now</button><p>Ends every scene set off here and goes back to the automatic page.</p></div>
 <div id=a></div>
+<p id=none hidden></p>
 <pre id=e></pre>
 </main>
 <script>
 const post=(n,b)=>{fetch('action?name='+encodeURIComponent(n),{method:'POST'});if(b){b.classList.add('done');setTimeout(()=>b.classList.remove('done'),600)}};
-function make(tag,props,kids){const e=Object.assign(document.createElement(tag),props||{});(kids||[]).forEach(k=>e.append(k));return e}
+function make(tag,props,kids){const {dataset,...rest}=props||{};const e=Object.assign(document.createElement(tag),rest);Object.assign(e.dataset,dataset||{});(kids||[]).forEach(k=>e.append(k));return e}
 document.getElementById('reset').onclick=e=>post('reset',e.target);
 setInterval(async()=>{document.getElementById('f').src='frame.png?'+Date.now();
 document.getElementById('e').textContent=await (await fetch('error')).text()},100);
+// the picker: Auto (naming the page it chose) and every page in knob order
+let view={pages:[],shown:'',auto:true},viewKey='';
+const showPage=(n,b)=>{fetch('show?page='+encodeURIComponent(n),{method:'POST'});if(b){b.classList.add('done');setTimeout(()=>b.classList.remove('done'),600)}};
+function filter(){let any=false;document.querySelectorAll('#a section').forEach(s=>{s.hidden=s.dataset.page!==view.shown;any=any||!s.hidden});
+  const none=document.getElementById('none');none.hidden=any||!view.shown;none.textContent='Nothing to set off on '+view.shown+'.'}
+setInterval(async()=>{
+  view=await (await fetch('pages')).json();const key=JSON.stringify(view);if(key===viewKey)return;viewKey=key;
+  document.getElementById('pg').replaceChildren(
+    make('button',{textContent:view.auto&&view.shown?'Auto ('+view.shown+')':'Auto',ariaPressed:String(view.auto),onclick:e=>showPage('',e.target)}),
+    ...view.pages.map(n=>make('button',{textContent:n,ariaPressed:String(!view.auto&&n===view.shown),className:view.auto&&n===view.shown?'auto':'',onclick:e=>showPage(n,e.target)})));
+  filter();
+},250);
 let shown='';
 setInterval(async()=>{
   const names=await (await fetch('actions')).json()||[];const key=names.join('|');if(key===shown)return;shown=key;
@@ -157,10 +204,11 @@ setInterval(async()=>{
     const [,pg,sec,label]=m;if(!pages.has(pg))pages.set(pg,{reset:null,secs:new Map()});const p=pages.get(pg);
     if(label==='reset'&&!sec){p.reset=n;return}
     const s=sec||'';if(!p.secs.has(s))p.secs.set(s,[]);p.secs.get(s).push([label,n])});
-  document.getElementById('a').replaceChildren(...[...pages].map(([pg,p])=>make('section',{},[
+  document.getElementById('a').replaceChildren(...[...pages].map(([pg,p])=>make('section',{dataset:{page:pg}},[
     make('h2',{},[pg].concat(p.reset?[make('a',{textContent:'reset '+pg,onclick:e=>post(p.reset)})]:[])),
     ...[...p.secs].map(([s,acts])=>make('div',{className:'row'},[make('span',{textContent:s}),
       make('div',{},acts.map(([label,n])=>make('button',{textContent:label,onclick:e=>post(n,e.target)})))]))])));
+  filter();
 },1000);
 </script>`
 

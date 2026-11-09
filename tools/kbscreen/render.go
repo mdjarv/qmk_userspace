@@ -262,6 +262,35 @@ func (r *renderer) actions() []string {
 	return names
 }
 
+// pageView is what the preview's page picker shows: the pages in knob
+// order, the one showing, and whether that is the automatic choice.
+type pageView struct {
+	Pages []string `json:"pages"`
+	Shown string   `json:"shown"`
+	Auto  bool     `json:"auto"`
+}
+
+// pageState asks main.js which pages there are and which one shows.
+func (r *renderer) pageState() pageView {
+	var v pageView
+	val, err := runBounded(r.vm, func() (goja.Value, error) {
+		return r.vm.RunString("typeof pageState === 'function' ? pageState() : null")
+	})
+	if err == nil && val != nil && !goja.IsNull(val) {
+		r.vm.ExportTo(val, &v)
+	}
+	return v
+}
+
+// pickPage shows that page as a knob press would; "" goes back to automatic.
+func (r *renderer) pickPage(name string) error {
+	r.vm.Set("PICK_NAME", name)
+	_, err := runBounded(r.vm, func() (goja.Value, error) {
+		return r.vm.RunString("typeof pick === 'function' && pick(PICK_NAME)")
+	})
+	return err
+}
+
 // runAction calls the action of that name.
 func (r *renderer) runAction(name string) error {
 	r.vm.Set("ACTION_NAME", name)

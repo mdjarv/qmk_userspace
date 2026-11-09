@@ -138,9 +138,13 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 		case b := <-spectrum:
 			st.update(func(st *state) { st.media.Bands, st.media.BandsAt = b, time.Now() })
 			continue
-		case name := <-pv.requests():
-			if err := rend.runAction(name); err != nil {
-				say("action %s: %v", name, err)
+		case req := <-pv.requests():
+			if req.pick {
+				if err := rend.pickPage(req.name); err != nil {
+					say("page %s: %v", req.name, err)
+				}
+			} else if err := rend.runAction(req.name); err != nil {
+				say("action %s: %v", req.name, err)
 			}
 			continue
 		case ev, ok := <-events:
@@ -180,6 +184,9 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 			continue
 		}
 		pv.setFrame(frame)
+		if pv != nil {
+			pv.setPages(rend.pageState())
+		}
 		if err := rend.saveState(now, false); err != nil {
 			say("save: %v", err)
 		}

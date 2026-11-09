@@ -214,6 +214,32 @@ func TestBuiltInKnobAndDisplay(t *testing.T) {
 	}
 }
 
+// The preview's page picker: it sees the pages and the automatic choice,
+// shows one page as a knob press would, and goes back to automatic.
+func TestPreviewPicksPages(t *testing.T) {
+	r, err := newRenderer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := testData(false, nil)
+	r.frame(d, 0)
+	if v := r.pageState(); !v.Auto || v.Shown == "" || len(v.Pages) < 3 {
+		t.Fatalf("automatic: %+v", v)
+	}
+	if err := r.pickPage("perf"); err != nil {
+		t.Fatal(err)
+	}
+	r.frame(d, 50)
+	if v := r.pageState(); v.Auto || v.Shown != "perf" {
+		t.Fatalf("picked perf: %+v", v)
+	}
+	r.pickPage("")
+	r.frame(d, 100)
+	if v := r.pageState(); !v.Auto || v.Shown == "perf" {
+		t.Fatalf("back to automatic: %+v", v)
+	}
+}
+
 // A new file in pages/ is noticed and becomes a page, after the built-in ones
 // in the knob order.
 func TestNewPageFileIsLoaded(t *testing.T) {

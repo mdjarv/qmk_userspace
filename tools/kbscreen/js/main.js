@@ -57,6 +57,12 @@ function showPage(name) {
   overrideContext = lastData ? context(lastData) : null;
 }
 
+// For the preview page's picker: the pages, the one showing and whether it
+// is the automatic choice; pick(name) shows one, pick('') goes back to
+// automatic (a long press).
+function pageState() { return { pages: PAGES.map(p => p.name), shown: shown || '', auto: !override }; }
+function pick(name) { if (name) showPage(name); else override = null; }
+
 function night(d) {
   const hour = Number(d.sys.clock.slice(0, 2));
   return hour >= 22 || hour < 7;
