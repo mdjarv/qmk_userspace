@@ -396,6 +396,7 @@ type jsCouncil struct {
 	Waiting         bool              `json:"waiting"`
 	BriefRound      int               `json:"briefRound"`
 	HandedOverRound int               `json:"handedOverRound"`
+	UpdatedAgo      int               `json:"updatedAgo"` // seconds since it last moved, -1 unknown
 	Cast            []jsCouncilMember `json:"cast"`
 }
 
@@ -454,7 +455,10 @@ func toJS(sys Sys, cpuHist, gpuHist []uint8, m Media, a *Agents, now time.Time) 
 		d.Councils = []jsCouncil{}
 		for _, c := range a.Councils {
 			jc := jsCouncil{ID: c.ID, Title: asciiOnly(c.Title), Status: c.Status, Running: c.Running, Round: c.Round, AutoRounds: c.AutoRounds,
-				Scribing: c.Scribing, Waiting: c.Waiting, BriefRound: c.BriefRound, HandedOverRound: c.HandedOverRound, Cast: []jsCouncilMember{}}
+				Scribing: c.Scribing, Waiting: c.Waiting, BriefRound: c.BriefRound, HandedOverRound: c.HandedOverRound, UpdatedAgo: -1, Cast: []jsCouncilMember{}}
+			if at, err := time.Parse(time.RFC3339Nano, c.UpdatedAt); err == nil {
+				jc.UpdatedAgo = int(max(now.Sub(at), 0) / time.Second)
+			}
 			for _, m := range c.Cast {
 				jc.Cast = append(jc.Cast, jsCouncilMember{Name: asciiOnly(m.Name), Role: asciiOnly(m.Role), State: m.State, Turn: m.Turn, Tool: asciiOnly(m.Tool)})
 			}

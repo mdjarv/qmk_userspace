@@ -18,8 +18,16 @@ const has = name => PAGES.some(p => p.name === name);
 // Without music the farm and the fishing page take turns, ten minutes each.
 const ROTATION = ['farm', 'fishing'], TURN_MS = 10 * 60000;
 let now = 0;
-// A live council debating, writing its brief, or with an answer not yet handed over.
-const councilBusy = d => (d.councils || []).some(c => c.status !== 'ended' && (c.running || c.scribing || c.waiting));
+// A live council debating, writing its brief, with an answer not yet handed
+// over, or moved in the last five minutes (just started, or between rounds);
+// not one idle since its answer was handed over.
+const COUNCIL_FRESH_S = 300;
+const councilBusy = d => (d.councils || []).some(c => {
+  if (c.status === 'ended') return false;
+  if (c.running || c.scribing || c.waiting) return true;
+  const handed = c.briefRound > 0 && c.handedOverRound >= c.briefRound;
+  return !handed && c.updatedAgo >= 0 && c.updatedAgo < COUNCIL_FRESH_S;
+});
 function context(d) {
   if (councilBusy(d) && has('council')) return 'council';
   if (d.media.playing && has('music')) return 'music';

@@ -198,8 +198,8 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 		a.Rows[1] != (AgentRow{Name: "PINT", State: agentWorking, ID: "w1", Parent: "lead", Context: -1}) {
 		t.Fatalf("agents = %+v, %v", a, err)
 	}
-	d := toJS(Sys{}, nil, nil, Media{}, &a, time.Now())
-	if len(d.Councils) != 2 || d.Councils[0].ID != "new" || d.Councils[0].Title != "Karnfragan" || d.Councils[0].Round != 2 ||
+	d := toJS(Sys{}, nil, nil, Media{}, &a, time.Date(2026, 11, 9, 9, 31, 0, 0, time.UTC))
+	if len(d.Councils) != 2 || d.Councils[0].ID != "new" || d.Councils[0].Title != "Karnfragan" || d.Councils[0].Round != 2 || d.Councils[0].UpdatedAgo != 59 ||
 		d.Councils[0].Cast[0] != (jsCouncilMember{Name: "Sokrates", Role: "questioner", State: "tool", Turn: 2, Tool: "WebSearch"}) {
 		t.Fatalf("councils = %+v", d.Councils)
 	}
