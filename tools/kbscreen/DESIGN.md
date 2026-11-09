@@ -11,7 +11,7 @@ What the screens are for and what has been decided about how they look. Read thi
 
 ## Point of view
 
-The screen is there to be cool first and useful second. It sits in peripheral vision, so it should read at a glance and never demand attention.
+The screen is there to be cool first and useful second. It sits in peripheral vision, so it should read at a glance and never demand attention. It is not where agents get noticed: Agentique on the main screen is, and the OLEDs sit out of the line of sight (2026-11-09). So the agent pages are a glanceable overview and a pleasure to watch, never a notification channel.
 
 ## Verdicts so far
 
