@@ -14,16 +14,15 @@ page('council', (function () {
   const mirror = rows => rows.map(r => r.split('').reverse().join(''));
   const seedOf = s => { let h = 7; for (const c of String(s)) h = (h * 33 + c.charCodeAt(0)) % 9973; return h; };
 
-  // ---- the cast: 7 wide, front-on, faces cut out ----------------------------
-  // head: the rows down to the chin; eyes: the row with the eyes, which
-  // dozing closes. Built-in personas have a look of their own; anyone else is
-  // hooded, the hood picked by a hash of the name.
+  // ---- the cast: 7 wide, front-on, faces cut out, shown standing ------------
+  // head: the rows down to the chin. Built-in personas have a look of their
+  // own; anyone else is hooded, the hood picked by a hash of the name.
   const LOOKS = {
-    socrates: { head: ['..###..', '.#####.', '.#.#.#.', '.#####.', '##...##', '#######', '.#####.', '..#.#..'], eyes: 2 }, // bald, a beard
-    nietzsche: { head: ['.#####.', '.#####.', '.#.#.#.', '.#####.', '#######', '#.#.#.#', '..###..'], eyes: 2 },      // the moustache
-    odysseus: { head: ['#.#.#.#', '.#####.', '...#...', '.#####.', '.#...#.', '.##.##.', '.##.##.'], eyes: -1 },     // a plumed helmet
-    spark: { head: ['#..#..#', '.#.#.#.', '.#####.', '.#.#.#.', '.#####.', '..###..'], eyes: 3 },                    // lightning hair
-    razor: { head: ['...#...', '..###..', '..#.#..', '..###..', '...#...'], eyes: 2, thin: true },                    // blade-thin
+    socrates: { head: ['..###..', '.#####.', '.#.#.#.', '.#####.', '##...##', '#######', '.#####.', '..#.#..'] }, // bald, a beard
+    nietzsche: { head: ['.#####.', '.#####.', '.#.#.#.', '.#####.', '#######', '#.#.#.#', '..###..'] },      // the moustache
+    odysseus: { head: ['#.#.#.#', '.#####.', '...#...', '.#####.', '.#...#.', '.##.##.', '.##.##.'] },     // a plumed helmet
+    spark: { head: ['#..#..#', '.#.#.#.', '.#####.', '.#.#.#.', '.#####.', '..###..'] },                    // lightning hair
+    razor: { head: ['...#...', '..###..', '..#.#..', '..###..', '...#...'], thin: true },                    // blade-thin
   };
   const HOODS = [
     ['...#...', '..###..', '.#####.', '#.....#', '#.#.#.#', '#.....#'],
@@ -35,19 +34,17 @@ page('council', (function () {
     const l = LOOKS[String(name).toLowerCase()];
     if (l) return l;
     const h = seedOf(name);
-    return { head: HOODS[h % HOODS.length], eyes: 4, hood: true, belt: (h >> 2) % 2 === 1 };
+    return { head: HOODS[h % HOODS.length], hood: true, belt: (h >> 2) % 2 === 1 };
   }
-  // Bodies from the shoulders down, 7 wide; seated ones end where they sit
-  // on their log.
+  // Standing bodies from the shoulders down, 7 wide.
   const BODY = {
     stand: ['.#####.', '#######', '#.###.#', '#.###.#', '..###..', '..#.#..', '..#.#..'],
-    seat: ['.#####.', '#.###.#', '#######'],
     thinStand: ['..###..', '.#.#.#.', '.#.#.#.', '..###..', '..#.#..', '..#.#..'],
-    thinSeat: ['..###..', '.#.#.#.', '.#####.'],
     cloak: ['#######', '#######', '.#####.', '.#####.', '.#####.', '.#...#.'],
-    cloakSeat: ['#######', '#######', '#######'],
   };
-  const LOG = ['###########'];
+  // Seated: a small figure, the same for everyone, sitting on its log.
+  const SMALL = { head: ['.###.', '#.#.#', '.###.'], shut: ['.###.', '#####', '.###.'], body: ['#####', '#####'] };
+  const LOG = ['#########'];
   const LANTERN = ['.#.', '###', '#.#', '###'];
   // the speaker's arm on the fire side, out and up in turn: [dx, dy] from the
   // body's top left, for a fire to the right
@@ -57,16 +54,15 @@ page('council', (function () {
   const lit = (rows, x, y, out) => rows.forEach((r, yy) => { for (let xx = 0; xx < r.length; xx++) if (r[xx] === '#') out.push([x + xx, y + yy]); });
 
   // A member at its seat (cx, feet); side is where the fire is (-1 left, 1
-  // right, 0 above or below). Seated states sit on the seat's log. Speaking
-  // and using a tool stand up off it, a step toward the fire, outlined so
-  // they stand out against it. Returns the top of its head.
+  // right, 0 above or below). Seated states sit small on the seat's log.
+  // Speaking and using a tool stand up off it, a step toward the fire, full
+  // size in the persona's own look and outlined so they stand out. Returns
+  // the top of its head.
   function member(m, cx, feet, side, t, i) {
     const look = lookOf(m.name), s = m.state;
     const standing = s === 'writing' || s === 'tool';
-    put(LOG, cx - 5, feet);
-    let head = look.head;
-    if (s === 'stopped' && look.eyes >= 0) head = head.map((r, k) => (k === look.eyes ? r[0] + r.slice(1, -1).replace(/\./g, look.hood ? '.' : '#') + r.slice(-1) : r));
-    if (s === 'stopped' && look.hood) head = head.map((r, k) => (k === look.eyes ? '#.....#' : r));
+    put(LOG, cx - 4, feet);
+    const head = look.head;
     if (standing) {
       const x = cx - 3 + (side ? side * 2 : 5), ft = feet; // off the log, toward the fire or aside
       let body = look.hood ? BODY.cloak : look.thin ? BODY.thinStand : BODY.stand;
@@ -83,16 +79,16 @@ page('council', (function () {
       if (look.belt) f.fill(x + 1, top + 2, 5, 1, false);
       return hy;
     }
-    const body = look.hood ? BODY.cloakSeat : look.thin ? BODY.thinSeat : BODY.seat;
-    const x = cx - 3, top = feet - body.length;
-    put(body, x, top);
+    // seated, everyone is the same small figure; the look only shows standing
+    const x = cx - 2, top = feet - SMALL.body.length;
+    put(SMALL.body, x, top);
     // the head: upright; leaning back from the fire when answered; dropped
-    // toward it when failed; bowed when dozing
-    let hx = x, hy = top - head.length;
-    if (s === 'answered') hx -= 2 * side;
-    if (s === 'failed') { hx += side || 0; hy += 3; }
-    if (s === 'stopped') hy += 2;
-    put(head, hx, hy);
+    // toward it when failed; bowed with its eyes shut when dozing
+    let hx = x, hy = top - SMALL.head.length;
+    if (s === 'answered') hx -= side;
+    if (s === 'failed') { hx += side; hy += 2; }
+    if (s === 'stopped') hy += 1;
+    put(s === 'stopped' ? SMALL.shut : SMALL.head, hx, hy);
     if (s === 'thinking') // dots rising like smoke
       for (let k = 0; k < 3; k++) {
         const p = ((t / 2200) + k / 3 + i * 0.17) % 1;
