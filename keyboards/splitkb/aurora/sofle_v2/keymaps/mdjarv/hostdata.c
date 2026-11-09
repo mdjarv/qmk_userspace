@@ -25,6 +25,13 @@ void host_send_event(uint8_t kind, uint8_t a, uint8_t b) {
     raw_hid_send(r, sizeof(r));
 }
 
+void host_send_report(uint8_t kind, const uint8_t *data, uint8_t len) {
+    if (!presented || timer_elapsed32(last_report) >= HOST_LISTENING_MS) return;
+    uint8_t r[32] = {HOST_EVENT, kind};
+    memcpy(r + 2, data, MIN(len, sizeof(r) - 2));
+    raw_hid_send(r, sizeof(r));
+}
+
 bool host_keep_awake(void) {
     if (awake && (int32_t)(timer_read32() - awake_until) >= 0) awake = false; // deadline passed
     return awake;

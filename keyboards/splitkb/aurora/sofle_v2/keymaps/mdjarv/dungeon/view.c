@@ -373,13 +373,16 @@ static bool billboard(const char *const *rows, uint8_t h, uint8_t cx, uint8_t cy
     fx      x0 = sx - wp / 2, y0 = foot - hp;
     memset(mask, 0, sizeof(mask));
     bool any = false;
+    // texels per pixel, worked out once: a 64-bit division per pixel is slow
+    // on the RP2040, which has no hardware for it
+    fx sv_step = divq(h * ONE, hp), su_step = divq(sw * ONE, wp);
     for (int16_t j = y0 >> 16; j <= foot >> 16; j++) {
         if (j < 0 || j >= VIEW_H) continue;
-        int32_t sv = (int32_t)(((int64_t)(j * ONE + ONE / 2 - y0) * h) / hp);
+        int32_t sv = mulq(j * ONE + ONE / 2 - y0, sv_step) >> 16;
         if (sv < 0 || sv >= h) continue;
         for (int16_t i = x0 >> 16; i <= (x0 + wp) >> 16; i++) {
             if (i < 0 || i >= DUNGEON_W || ty >= zbuf[i]) continue;
-            int32_t su = (int32_t)(((int64_t)(i * ONE + ONE / 2 - x0) * sw) / wp);
+            int32_t su = mulq(i * ONE + ONE / 2 - x0, su_step) >> 16;
             if (su < 0 || su >= sw || rows[sv][su] != '#') continue;
             mask[j] |= 1u << i;
             any = true;

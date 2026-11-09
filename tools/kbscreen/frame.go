@@ -21,6 +21,7 @@ const (
 	eventState      = 2 // [2] highest layer  [3] mods
 	eventKnobLong   = 3
 	eventKnobDouble = 4
+	eventDungeon    = 5 // once a second in dungeon mode: what it costs (hostdata.h)
 
 	fullEvery = 5 * time.Second // resend every chunk: a reflashed keyboard has none
 	keepAlive = time.Second     // present at least this often; the keyboard gives up after 3 s

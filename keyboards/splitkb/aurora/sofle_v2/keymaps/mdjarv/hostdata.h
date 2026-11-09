@@ -27,6 +27,11 @@ enum host_event_kind {
     HOST_EVENT_STATE       = 2, // [2] highest layer  [3] mods (QMK's 8 mod bits); on change and once a second
     HOST_EVENT_KNOB_LONG   = 3, // held for KNOB_LONG_MS
     HOST_EVENT_KNOB_DOUBLE = 4, // pressed twice within KNOB_DOUBLE_MS
+    // Once a second in dungeon mode, for kbscreen's log (game.c): [2..3] slowest
+    // render us  [4..5] mean render us  [6] renders  [7..8] main loops  [9..10]
+    // split transfers sent  [11..12] failed  [13] chunks the other half has
+    // received (mod 256)  [14] whether it shows them. Numbers little-endian.
+    HOST_EVENT_DUNGEON = 5,
 };
 
 #define HOST_FRAME_SIZE 512
@@ -35,5 +40,7 @@ enum host_event_kind {
 // The newest frame, or NULL when none arrived within timeout_ms.
 const uint8_t *host_frame(uint32_t timeout_ms);
 void           host_send_event(uint8_t kind, uint8_t a, uint8_t b);
+// An event with up to 30 bytes of data.
+void           host_send_report(uint8_t kind, const uint8_t *data, uint8_t len);
 // Whether the host currently asks for the OLEDs to stay on.
 bool host_keep_awake(void);

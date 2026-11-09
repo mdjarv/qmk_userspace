@@ -8,7 +8,23 @@
 #include <string.h>
 #include "transactions.h"
 #include "game.h"
+#include "hostdata.h"
 #include "dungeon/dungeon.h"
+#ifdef CONVERT_TO_LIATRIS
+// The RP2040's free-running 1 MHz timer, low word (TIMERAWL, datasheet 4.6.5).
+#    define now_us() (*(volatile uint32_t *)0x40054028)
+#else
+#    define now_us() (timer_read32() * 1000)
+#endif
+
+// What it costs, sent to kbscreen once a second while playing (it logs them;
+// HOST_EVENT_DUNGEON in hostdata.h).
+static struct {
+    uint32_t render_max, render_sum;
+    uint16_t renders, loops, rpc_ok, rpc_fail;
+    uint8_t  slave_rx, slave_on;
+    uint32_t sent_at;
+} diag;
 
 #define GAME_FRAME_MS 50 // 20 fps, the OLED's own refresh
 
@@ -57,7 +73,12 @@ void game_key(uint16_t keycode) {
 
 void game_render(void) {
     if (dirty || timer_elapsed(drawn_at) >= GAME_FRAME_MS) {
+        uint32_t t0 = now_us();
         dungeon_render(frame, timer_read32());
+        uint32_t us = now_us() - t0;
+        diag.render_sum += us;
+        if (us > diag.render_max) diag.render_max = us;
+        diag.renders++;
         drawn_at = timer_read();
         dirty    = false;
     }
@@ -85,9 +106,16 @@ static uint32_t hud_sent_at;
 static uint8_t  hud_rx[DUNGEON_FRAME_SIZE];
 static bool     hud_rx_on;
 static uint32_t hud_rx_at;
+static uint8_t  hud_rx_count;
 
+// Answers with [0] chunks received so far (mod 256)  [1] whether it shows them.
 static void hud_receive(uint8_t in_len, const void *in, uint8_t out_len, void *out) {
     const uint8_t *d = in;
+    if (out_len >= 2) {
+        hud_rx_count++;
+        ((uint8_t *)out)[0] = hud_rx_count;
+        ((uint8_t *)out)[1] = hud_rx_on;
+    }
     if (in_len < 1) return;
     if (d[0] == HUD_OFF) {
         hud_rx_on = false;
@@ -110,8 +138,23 @@ const uint8_t *game_hud_frame(void) {
     return hud_rx;
 }
 
+static void report(void) {
+    diag.loops++;
+    if (!active || timer_elapsed32(diag.sent_at) < 1000) return;
+    diag.sent_at = timer_read32();
+    uint16_t mean = diag.renders ? diag.render_sum / diag.renders : 0;
+    uint16_t max  = diag.render_max > 0xFFFF ? 0xFFFF : diag.render_max;
+    uint8_t  d[13] = {max & 0xFF, max >> 8, mean & 0xFF, mean >> 8, diag.renders > 255 ? 255 : diag.renders, diag.loops & 0xFF, diag.loops >> 8,
+                      diag.rpc_ok & 0xFF, diag.rpc_ok >> 8, diag.rpc_fail & 0xFF, diag.rpc_fail >> 8, diag.slave_rx, diag.slave_on};
+    host_send_report(HOST_EVENT_DUNGEON, d, sizeof(d));
+    uint32_t sent_at = diag.sent_at;
+    memset(&diag, 0, sizeof(diag));
+    diag.sent_at = sent_at;
+}
+
 // One chunk per call, so the scan loop never waits on more than one transfer.
 void game_task(void) {
+    report();
     if (active != hud_was_active) {
         hud_was_active  = active;
         hud_pending     = active ? (1u << HUD_CHUNKS) - 1 : 0; // on entry the other half has nothing yet
@@ -138,9 +181,15 @@ void game_task(void) {
     uint8_t  msg[HUD_CHUNK + 1];
     msg[0] = c;
     memcpy(msg + 1, hud + off, n);
-    if (transaction_rpc_send(USER_SYNC_DUNGEON, n + 1, msg)) {
+    uint8_t reply[2] = {0};
+    if (transaction_rpc_exec(USER_SYNC_DUNGEON, n + 1, msg, sizeof(reply), reply)) {
         memcpy(hud_sent + off, hud + off, n);
         hud_pending &= ~(1u << c);
         hud_sent_at = timer_read32();
+        diag.rpc_ok++;
+        diag.slave_rx = reply[0];
+        diag.slave_on = reply[1];
+    } else {
+        diag.rpc_fail++;
     }
 }

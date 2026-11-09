@@ -50,7 +50,10 @@ func (d *device) send(r report) error {
 	return err
 }
 
-type event struct{ kind, a, b byte }
+type event struct {
+	kind, a, b byte
+	data       [reportSize - 2]byte // everything after the kind; a and b are its first two bytes
+}
 
 // events delivers the keyboard's event reports until the device closes.
 func (d *device) events() <-chan event {
@@ -64,8 +67,10 @@ func (d *device) events() <-chan event {
 				return
 			}
 			if n >= 4 && buf[0] == msgEvent {
+				ev := event{kind: buf[1], a: buf[2], b: buf[3]}
+				copy(ev.data[:], buf[2:])
 				select {
-				case ch <- event{buf[1], buf[2], buf[3]}:
+				case ch <- ev:
 				default:
 				}
 			}

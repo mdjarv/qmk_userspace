@@ -152,7 +152,9 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 				events = nil
 				continue
 			}
-			if ev.kind == eventState {
+			if ev.kind == eventDungeon {
+				logDungeon(ev.data[:])
+			} else if ev.kind == eventState {
 				kb := toKeyboard(ev.a, ev.b)
 				st.update(func(st *state) { st.keyboard = kb })
 			} else if err := rend.pressKnob(ev.kind); err != nil {
@@ -395,4 +397,12 @@ func logData(ctx context.Context, st *state) {
 				a.Running, a.Waiting, a.LaterWaiting, a.OldestWait, a.LaterIdle, a.NewQuestion, a.Rows)
 		}
 	}
+}
+
+// logDungeon logs the keyboard's dungeon-mode report (HOST_EVENT_DUNGEON in
+// the keymap's hostdata.h): render cost, main loop rate, the split link.
+func logDungeon(d []byte) {
+	u16 := func(i int) int { return int(d[i]) | int(d[i+1])<<8 }
+	log.Printf("dungeon: render max %dus mean %dus x%d, %d loops/s, split sent %d failed %d, other half has %d chunks, showing %v",
+		u16(0), u16(2), d[4], u16(5), u16(7), u16(9), d[11], d[12] != 0)
 }
