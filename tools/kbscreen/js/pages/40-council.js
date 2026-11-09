@@ -11,6 +11,8 @@ page('council', (function () {
   function put(rows, x, y) {
     rows.forEach((r, yy) => { for (let xx = 0; xx < r.length; xx++) { if (r[xx] === '#') f.px(x + xx, y + yy); else if (r[xx] === 'o') f.px(x + xx, y + yy, false); } });
   }
+  // every other lit pixel, a checker: a faint figure
+  function putFaint(rows, x, y) { rows.forEach((r, yy) => { for (let xx = 0; xx < r.length; xx++) if (r[xx] === '#' && (x + xx + y + yy) % 2 === 0) f.px(x + xx, y + yy); }); }
   const mirror = rows => rows.map(r => r.split('').reverse().join(''));
   const seedOf = s => { let h = 7; for (const c of String(s)) h = (h * 33 + c.charCodeAt(0)) % 9973; return h; };
 
@@ -43,6 +45,7 @@ page('council', (function () {
   const SMALL = { head: ['.###.', '#.#.#', '.###.'], shut: ['.###.', '#####', '.###.'], body: ['#####', '#####'],
     hollowHead: ['.###.', '#...#', '.###.'], hollowBody: ['#####', '#...#'] };
   const LOG = ['#########'];
+  const SEATED = 'faint'; // small, heads, faint (trial)
   const LANTERN = ['.#.', '###', '#.#', '###'];
 
   // ---- talking: the whole body ------------------------------------------------
@@ -113,6 +116,19 @@ page('council', (function () {
       if (look.belt) f.fill(x + 1, top + 2, 5, 1, false);
       return hy;
     }
+    if (SEATED !== 'small') { // seated: the persona's head on a small body; hollow or faint until it has spoken
+      const ahead = s === 'waiting', faint = ahead && SEATED === 'faint';
+      const body = ahead && !faint ? ['#####', '#...#', '#...#'] : ['#####', '#####', '#####'];
+      const top = feet - body.length, draw = faint ? putFaint : put;
+      draw(body, cx - 2, top);
+      let hx = cx - 3, hy = top - look.head.length;
+      if (s === 'answered') hx -= side;
+      if (s === 'failed') { hx += side; hy += 2; }
+      if (s === 'stopped') hy += 1;
+      draw(look.head, hx, hy);
+      if (s === 'stopped') { const p = ((t / 2000) + i * 0.3) % 1; f.tiny('Z', cx + (side > 0 ? -7 : 5) + Math.round(p * 2), hy - 3 - Math.round(p * 4)); }
+      return hy;
+    }
     // seated, everyone is the same small figure; the look only shows standing
     const x = cx - 2, top = feet - SMALL.body.length, ahead = s === 'waiting';
     put(ahead ? SMALL.hollowBody : SMALL.body, x, top);
@@ -179,22 +195,37 @@ page('council', (function () {
   // ---- the scribe, the brief and the answer --------------------------------------
   const DESK_Y = 24;
   const SCRIBE = ['.#####.', '#######', '.#####.', '.#.#.#.', '.#####.', '..###..', '.#####.', '#######', '#.###.#'];
-  const QUILL = ['...#', '..#.', '.#..', '#...'];
+  const SCRIBE_DOWN = ['.#####.', '#######', '.#####.', '.#####.', '.#.#.#.', '..###..', '.#####.', '#######', '#.###.'];
+  const QUILL = ['....#', '...#.', '..##.', '.#...'];
   const BLANK = ['.#####.', '#.....#', '.#####.'];
   const SEALED = ['.##.........##.', '#..#########..#', '#..#...#...#..#', '#..#..###..#..#', '#..#...#...#..#', '#..#########..#', '.##.........##.'];
+  const scribingFrom = new Map(); // council id -> t it was first seen scribing
   function scribe(c, t) {
-    put(SCRIBE, 4, DESK_Y - SCRIBE.length);
     for (let x = 1; x <= 30; x++) f.px(x, DESK_Y);
     f.fill(2, DESK_Y + 1, 1, 4); f.fill(29, DESK_Y + 1, 1, 4);
-    if (c.scribing) { // the sheet hangs over the desk's edge, longer with every round it covers
-      const len = 4 + 2 * Math.min(Math.max(c.briefRound, 1), 4), x = 15;
-      f.fill(x - 1, DESK_Y - 2, 13, 2); // the roll it comes off
-      for (let y = DESK_Y + 2; y < DESK_Y + len - 1; y += 2) for (let i = 2; i < 9; i++) if ((i * 3 + y) % 7) f.px(x + i, y);
-      f.fill(x - 1, DESK_Y + len, 13, 2); // the roll at its foot
-      const p = (t / 2600) % 1, line = DESK_Y + len - 2; // the quill writes the last line
-      put(QUILL, x + 2 + Math.round(p * 5), line - 4);
-      for (let i = 2; i < 2 + Math.round(p * 5); i++) f.px(x + i, line);
-    } else if (!c.waiting && !(c.briefRound > 0)) put(BLANK, 18, DESK_Y - 3); // a blank scroll, ready
+    if (!c.scribing) {
+      scribingFrom.delete(c.id);
+      put(SCRIBE, 4, DESK_Y - SCRIBE.length);
+      if (!c.waiting && !(c.briefRound > 0)) put(BLANK, 18, DESK_Y - 3); // a blank scroll, ready
+      return;
+    }
+    // bent over the desk, eyes down, the quill scratching along the sheet;
+    // the sheet hangs over the desk's edge and unrolls as it fills, to a
+    // length that grows with every round the brief covers
+    if (!scribingFrom.has(c.id)) scribingFrom.set(c.id, t);
+    put(SCRIBE_DOWN, 4, DESK_Y - SCRIBE_DOWN.length);
+    const x = 15, w = 11, most = 6 + 3 * Math.min(Math.max(c.briefRound, 1), 4);
+    const len = Math.min(most, 3 + Math.floor((t - scribingFrom.get(c.id)) / 700));
+    f.fill(x - 1, DESK_Y - 1, w + 2, 1); // the sheet on the desk
+    f.fill(x, DESK_Y + 1, 1, len); f.fill(x + w - 1, DESK_Y + 1, 1, len);
+    for (let y = DESK_Y + 2, k = 0; y < DESK_Y + len - 1; y += 2, k++) { // the lines so far, ragged on the right
+      const n = 3 + (seedOf(c.id + k) % 5);
+      f.fill(x + 2, y, Math.min(n, w - 4), 1);
+    }
+    f.fill(x - 1, DESK_Y + len + 1, w + 2, 2); // the roll at its foot
+    const p = (t % 1800) / 1800, qx = x + Math.round(p * 7), qy = DESK_Y - 5 - (Math.floor(t / 150) % 2);
+    put(QUILL, qx, qy);
+    for (let ax = 11; ax < qx + 1; ax++) f.px(ax, DESK_Y - 2); // the forearm along the desk to the quill
   }
   const answer = () => { put(SEALED, 8, 117); f.tiny('?', 14, 109); };
 
@@ -240,7 +271,7 @@ page('council', (function () {
       const p = ms - at; at += th + to + wr + 400;
       return p < 0 ? 'waiting' : p < th ? 'thinking' : p < th + to ? 'tool' : p < th + to + wr ? 'writing' : 'answered';
     });
-    const scribing = ms >= at && ms < at + 4000, done = ms >= at + 4000;
+    const scribing = ms >= at && ms < at + 8000, done = ms >= at + 8000;
     return [fake({ round: 1, autoRounds: 1, running: ms < at, scribing, waiting: done, briefRound: ms >= at ? 1 : 0 }, states)];
   }));
   action('council: scribing', () => show([fake({ running: false, round: 3, scribing: true, briefRound: 2 }, ['answered'])]));
