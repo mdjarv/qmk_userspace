@@ -5,7 +5,9 @@
 | File | Holds |
 |---|---|
 | `keymap.json` | Layers, encoders, the Liatris converter and every standard setting (features, tap-hold, debounce, split sync). Layers are numbered here; `layers.h` names them for C. Run `make draw` after changing it to redraw `keymap.svg`. |
-| `keymap.c` | Behaviour: hold-to-toggle game mode, next OLED screen, Liatris LED off |
+| `keymap.c` | Behaviour: hold-to-toggle game mode, double-tap dungeon mode, next OLED screen, Liatris LED off |
+| `game.c`, `game.h` | Dungeon mode: hands keys to the game and draws it on the left OLED |
+| `dungeon/` | The game itself, plain C without QMK; `tools/dungeon` plays it on the PC |
 | `oled.c`, `gfx/` | OLED entry point and the animations |
 | `screens.c` | Left OLED: shows the frames `tools/kbscreen` draws, or the cat |
 | `hostdata.c`, `hostdata.h` | The frame protocol over Raw HID |
@@ -14,6 +16,7 @@
 Behaviour worth knowing:
 
 - **Game mode** (default layer 1) toggles after holding the outer right thumb key for 0.5 s, so a brushing palm does not switch it. The right OLED shows the amazed face instead of the headphones while it is on.
+- **Dungeon mode** toggles with a double tap of the same key (two taps under 0.2 s, the second within 0.3 s). The game takes every key except that one and the knobs, and draws on the left OLED in place of kbscreen; leaving keeps the game for next time. `make dungeon` plays it on the PC from the same code, `make dungeon-test` tests it.
 - **Esc / Right Shift** is one mod-tap key. Permissive hold makes pressing and releasing another key while it is down count as Shift.
 - **Knobs**: left is volume, right is scroll; both do nothing on Lower. Pressing the right knob goes to kbscreen (below); a single press lands 250 ms after release, since the keyboard first rules out a double press.
 - **Debounce** is `asym_eager_defer_pk` at 10 ms: presses register at once, releases wait 10 ms of stable contact, which swallows switch chatter.

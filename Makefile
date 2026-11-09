@@ -25,7 +25,7 @@ KBFLASH := $(KBFLASH_DIR)/kbflash
 FIRMWARE := $(QMK_USERSPACE)/$(subst /,_,$(KB))_$(KM).uf2
 export KBFLASH_CONFIG := $(QMK_USERSPACE)/kbflash.json
 
-.PHONY: backup restore drill build flash draw screen screen-install
+.PHONY: backup restore drill build flash draw screen screen-install dungeon dungeon-test
 
 $(KBFLASH): $(wildcard $(KBFLASH_DIR)/*.go) $(KBFLASH_DIR)/go.mod
 	cd $(KBFLASH_DIR) && go build -o kbflash .
@@ -66,6 +66,16 @@ screen-install: $(KBSCREEN)
 	systemctl --user enable kbscreen.service
 	systemctl --user restart kbscreen.service
 	test -e /etc/udev/rules.d/70-kbscreen.rules || echo "keyboard access: sudo install -m644 $(KBSCREEN_DIR)/70-kbscreen.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger"
+
+# The dungeon game on the PC (tools/dungeon), from the C core the firmware runs.
+# ARGS go to it, e.g. ARGS="-seed 7 -keys 'w w a' -png shot.png".
+DUNGEON_DIR := $(QMK_USERSPACE)/tools/dungeon
+dungeon:
+	cd $(DUNGEON_DIR) && go build -o dungeon . && ./dungeon $(ARGS)
+
+# AddressSanitizer needs clang with cgo; gcc's runtime will not load first.
+dungeon-test:
+	cd $(DUNGEON_DIR) && CC=clang go test -asan -count=1 .
 
 flash: $(KBFLASH)
 	$(KBFLASH) flash "$(FIRMWARE)" --build "$(QMK_BIN) compile -kb $(KB) -km $(KM)" $(if $(ERASE),--erase)

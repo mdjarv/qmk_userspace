@@ -5,6 +5,7 @@
 #include <string.h>
 #include "hostdata.h"
 #include "screens.h"
+#include "game.h"
 #include "gfx/idle_small.h"
 
 #define HOST_TIMEOUT 3000  // ms without a report before the cat takes over
@@ -25,6 +26,10 @@ static void render_cat(void) {
 }
 
 void screens_render(void) {
+    if (game_active()) {
+        game_render();
+        return;
+    }
     const uint8_t *frame = host_frame(HOST_TIMEOUT);
     if (frame) {
         oled_write_raw((const char *)frame, HOST_FRAME_SIZE);
