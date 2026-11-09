@@ -31,6 +31,13 @@ function knob(kind) {
   overrideContext = lastData ? context(lastData) : null;
 }
 
+// Shows a page as a knob press would (for actions that want to be seen).
+function showPage(name) {
+  if (!has(name)) return;
+  override = name;
+  overrideContext = lastData ? context(lastData) : null;
+}
+
 function night(d) {
   const hour = Number(d.sys.clock.slice(0, 2));
   return hour >= 22 || hour < 7;

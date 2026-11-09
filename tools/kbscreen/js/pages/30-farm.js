@@ -268,7 +268,12 @@ page('farm', (function () {
   const MOON = ['.###.', '##...', '#....', '##...', '.###.'];
   const SUN = ['.###.', '#####', '#####', '#####', '.###.'];
   const CLOUD = ['...###....', '.##...##..', '#.......##', '##########'];
+  let forcedWeather = null; // from the preview page, for a minute
   function weatherOf(d) {
+    if (forcedWeather && Date.now() < forcedWeather.until) {
+      const sky = forcedWeather.sky;
+      return { sky: sky === 'night' ? 'clear' : sky, night: sky === 'night', temp: sky === 'snow' ? -2 : 12, wind: sky === 'rain' || sky === 'storm' ? 25 : 5, forced: true };
+    }
     const w = d.weather, h = Number(d.sys.clock.slice(0, 2));
     if (!w) return { sky: 'clear', night: h >= 21 || h < 6, temp: 10, wind: 5 };
     return { sky: w.sky, night: !w.day, temp: w.temp, wind: w.wind, sunrise: w.sunrise };
@@ -534,7 +539,7 @@ page('farm', (function () {
   })();
   function ground(w, now) {
     const d = new Date(now), season = seasonOf(d), cold = w.temp <= 0;
-    const snowCover = w.temp <= 2 && now - ((save.events || {}).snowed || 0) < 48 * 60 * MIN;
+    const snowCover = (w.forced && w.sky === 'snow') || (w.temp <= 2 && now - ((save.events || {}).snowed || 0) < 48 * 60 * MIN);
     GROUND.forEach(([x, y], i) => {
       if (snowCover) { f.px(x, y); f.px(x + 2, y + 1); f.px(x + 1, y + 3); }
       else if (cold || season === 'winter') { if (i % 2 === 0) f.px(x, y); }
@@ -599,15 +604,15 @@ page('farm', (function () {
         if (save.homedWeek === undefined) save.homedWeek = save.departed || 0;
         return save.meteorWeek !== weekOf(c.now);
       },
-      start: c => {
+      prepare: c => {
         c.ev.ghosts = Math.min(save.homedWeek || 0, 5);
         c.ev.rocks = Array.from({ length: 12 }, (_, i) => ({ a: -Math.PI / 2 + (i - 5.5) * 0.28, v: 26 + (i * 37) % 23 }));
       },
+      // a new generation: tick brings one out of the house for every live session
+      finish: () => { mobs.clear(); kids.clear(); wipe = 0; },
       end: c => {
         Object.values(save.projects || {}).forEach(p => delete p.corner);
-        // a new generation: tick brings one out of the house for every live session
-        mobs.clear(); kids.clear(); save.crops = {}; wipe = 0;
-        save.harvest = 0; save.homedWeek = 0;
+        save.crops = {}; save.harvest = 0; save.homedWeek = 0;
         save.meteorWeek = weekOf(c.now);
         save.crater = c.now;
       },
@@ -673,7 +678,7 @@ page('farm', (function () {
     { // what the loads sold have paid for: the next upgrade is built in place
       name: 'upgrade', len: 5000, every: 0,
       when: () => UPGRADES.some(([n, part, tier]) => (save.sold || 0) >= n && tierOf(part) < tier),
-      start: c => { c.ev.up = UPGRADES.find(([n, part, tier]) => (save.sold || 0) >= n && tierOf(part) < tier); },
+      prepare: c => { c.ev.up = UPGRADES.find(([n, part, tier]) => (save.sold || 0) >= n && tierOf(part) < tier) || UPGRADES.find(([, part, tier]) => tierOf(part) < tier) || UPGRADES[UPGRADES.length - 1]; },
       end: c => { const [, part, tier] = c.ev.up; save.tiers = Object.assign(save.tiers || {}, { [part]: tier }); },
       draw: (c, k, t) => {
         const [, part, tier] = c.ev.up;
@@ -721,7 +726,7 @@ page('farm', (function () {
     { // a crow on a growing plant, pecking, until it is shooed off
       name: 'crow', len: 9000, every: 20 * MIN, mean: 40 * MIN,
       when: c => !c.w.night && !!growingPlant(),
-      start: c => { const m = growingPlant(); const k = CORNERS[m.corner]; c.ev.at = [k.px, k.y + 1]; },
+      prepare: c => { const m = growingPlant(), k = CORNERS[m ? m.corner : 0]; c.ev.at = [k.px, k.y + 1]; },
       draw: (c, k, t) => {
         const [px, py] = c.ev.at, flap = CROW[Math.floor(t / 150) % 2];
         if (k < 0.25) f.sprite(flap, Math.round(lerp(33, px, k / 0.25)), Math.round(lerp(-4, py, k / 0.25)));
@@ -754,25 +759,48 @@ page('farm', (function () {
     },
   ];
 
-  let cur = null, nextCheck = 0;
+  // An event can also be forced from the preview page's buttons (the
+  // actions below): it plays now whatever its conditions, as a show only.
+  // prepare and finish run either way; start and end, which change the game,
+  // only when it came by itself.
+  let cur = null, nextCheck = 0, forced = null;
   function events(c, t) {
     const ev = save.events = save.events || {};
     ev.last = ev.last || {};
     // what the weather did lately, for the rainbow and the snowman
-    if (c.w.sky === 'rain' || c.w.sky === 'storm') ev.raining = true;
-    else if (ev.raining) { ev.raining = false; ev.rainEnded = c.now; }
-    if (c.w.sky === 'snow') ev.snowed = c.now;
-    if (!cur && t >= nextCheck) {
+    if (!c.w.forced) {
+      if (c.w.sky === 'rain' || c.w.sky === 'storm') ev.raining = true;
+      else if (ev.raining) { ev.raining = false; ev.rainEnded = c.now; }
+      if (c.w.sky === 'snow') ev.snowed = c.now;
+    }
+    if (forced) {
+      if (cur && cur.e.finish) cur.e.finish(c);
+      cur = { e: forced, at: t, forced: true }; c.ev = cur; cartAway = false; forced = null;
+      if (cur.e.prepare) cur.e.prepare(c);
+    } else if (!cur && t >= nextCheck) {
       nextCheck = t + 5000;
       const pick = EVENTS.find(e => e.when(c) && c.now - (ev.last[e.name] || 0) >= e.every && (!e.mean || Math.random() < 5000 / e.mean));
-      if (pick) { cur = { e: pick, at: t }; c.ev = cur; ev.last[pick.name] = c.now; if (pick.start) pick.start(c); }
+      if (pick) {
+        cur = { e: pick, at: t }; c.ev = cur; ev.last[pick.name] = c.now;
+        if (pick.prepare) pick.prepare(c);
+        if (pick.start) pick.start(c);
+      }
     }
     if (!cur) return;
     c.ev = cur;
     const k = (t - cur.at) / cur.e.len;
-    if (k >= 1) { if (cur.e.end) cur.e.end(c); cur = null; cartAway = false; return; }
+    if (k >= 1) {
+      if (cur.e.finish) cur.e.finish(c);
+      if (cur.e.end && !cur.forced) cur.e.end(c);
+      cur = null; cartAway = false; return;
+    }
     cur.e.draw(c, k, t);
   }
+
+  // The preview page's buttons: every event, the quirks, and the weather for a minute.
+  EVENTS.forEach(e => action('farm: ' + e.name, () => { forced = e; showPage('farm'); }));
+  action('farm: quirks', () => { mobs.forEach(m => { m.quirkAt = 1; }); showPage('farm'); });
+  ['clear', 'cloud', 'rain', 'fog', 'snow', 'storm', 'night'].forEach(sky => action('weather: ' + sky, () => { forcedWeather = { sky, until: Date.now() + 60000 }; showPage('farm'); }));
 
   // ---- the page ------------------------------------------------------------------
   let last = null;

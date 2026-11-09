@@ -98,6 +98,11 @@ function page(name, draw) { PAGES.push({ name, draw }); }
 const TICKS = [];
 function tick(fn) { TICKS.push(fn); }
 
+// Things a page lets you set off by hand for testing (the preview page at
+// :8077 shows them as buttons): action(name, fn).
+const ACTIONS = new Map();
+function action(name, fn) { ACTIONS.set(name, fn); }
+
 // Whether an agent asked something in the last 10 minutes.
 const asking = d => d.agents && d.agents.newQuestion;
 

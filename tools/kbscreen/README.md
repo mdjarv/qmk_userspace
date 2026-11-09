@@ -15,7 +15,7 @@ The service runs the repo's `js/` (`make screen-install` points it there) and se
 
 Files load in this order, into one global scope:
 
-- `lib.js`: `Frame` (a 512-byte buffer in OLED layout with `px`, `fill`, `rect`, `dotted`, `text`/`glyph` in the keyboard's 6x8 font, `tiny`/`tinyRight` in a 3x5 font, `sprite` from `'#'` rows, `pages` for raw bytes), `W` = 32, `H` = 128, and what pages share: `f` (the frame they draw into, cleared before each page), `page(name, draw)`, `tick(fn)` (an `fn(d, t)` that runs every frame before the page draws, whichever page shows: for a game that keeps going behind other pages), `robot(x, y, state, t, i)` (the 9x9 agent avatar), `asking(d)`, and `display`.
+- `lib.js`: `Frame` (a 512-byte buffer in OLED layout with `px`, `fill`, `rect`, `dotted`, `text`/`glyph` in the keyboard's 6x8 font, `tiny`/`tinyRight` in a 3x5 font, `sprite` from `'#'` rows, `pages` for raw bytes), `W` = 32, `H` = 128, and what pages share: `f` (the frame they draw into, cleared before each page), `page(name, draw)`, `tick(fn)` (an `fn(d, t)` that runs every frame before the page draws, whichever page shows: for a game that keeps going behind other pages), `action(name, fn)` (something to set off by hand for testing: the preview page shows each as a button; the farm offers its events, its quirks and a minute of any weather, played as a show that leaves the save alone), `robot(x, y, state, t, i)` (the 9x9 agent avatar), `asking(d)`, and `display`.
 - `pages/*.js` in name order, one page each. A page registers a `draw(d, t)` that draws into `f`; the file name's number sets the knob order. Keep a page's helpers inside its wrapping function so pages cannot clash:
   ```js
   'use strict';
@@ -26,6 +26,7 @@ Files load in this order, into one global scope:
     };
   })());
   ```
+- `main.js` also has `showPage(name)`, which shows a page as a knob press would.
 - `main.js`: `render(d, t)` (picks the page, sets `display`, draws the volume readout over any page, returns `f.buf`) and `knob(kind)`, called with `"press"`, `"double"` (twice within 250 ms) or `"long"` (held 500 ms). A single press arrives 250 ms late, once the keyboard knows it was not a double. `context(d)` there decides which page comes up by itself.
 - `save`: an object the pages keep game state in (counters, crops). kbscreen hands it to every fresh runtime on reload and writes it to `~/.local/state/kbscreen/save.json` (`-save`) every 10 s and on exit; a file that is not JSON is moved to `save.json.bad`. Keep it plain JSON and small.
 - `display`: set `display.brightness` (0..255, the left OLED) and `display.keepAwake` (both OLEDs stay on past the 60 s idle blanking while true); kbscreen sends them on.

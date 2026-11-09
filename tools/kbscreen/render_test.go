@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -336,5 +338,43 @@ func TestFarmRunsWhileHidden(t *testing.T) {
 	step(agentIdle)
 	if saved.Harvest != 1 || saved.Crops["s1"] != nil {
 		t.Fatalf("the crop was not harvested behind the music page: %s", r.saveJSON)
+	}
+}
+
+// The preview's buttons: the farm offers its events as actions, and one set
+// off by hand plays through as a show, leaving the game in the save alone.
+func TestFarmActionIsAShowOnly(t *testing.T) {
+	r, err := newRenderer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(r.actions(), "farm: meteor") {
+		t.Fatalf("actions = %v", r.actions())
+	}
+	a := &Agents{Rows: []AgentRow{{Name: "QMK", State: agentWorking, ID: "s1"}}, Sessions: []Session{{ID: "s1", Name: "QMK", State: agentWorking}}}
+	d := testData(false, a)
+	d.Media.VolumeChangedAgo = -1
+	r.frame(d, 0)
+	r.checkpoint()
+	before := r.saveJSON
+	if err := r.runAction("farm: meteor"); err != nil {
+		t.Fatal(err)
+	}
+	for ms := int64(50); ms < 16000; ms += 50 {
+		if _, err := r.frame(d, ms); err != nil {
+			t.Fatalf("at %d ms: %v", ms, err)
+		}
+	}
+	r.checkpoint()
+	var b, after map[string]any
+	json.Unmarshal([]byte(before), &b)
+	json.Unmarshal([]byte(r.saveJSON), &after)
+	for _, k := range []string{"meteorWeek", "harvest", "crater", "crops", "homedWeek", "sold"} {
+		if fmt.Sprint(b[k]) != fmt.Sprint(after[k]) {
+			t.Fatalf("the show changed %s: %v -> %v", k, b[k], after[k])
+		}
+	}
+	if err := r.runAction("nope"); err == nil {
+		t.Fatal("an unknown action must fail")
 	}
 }

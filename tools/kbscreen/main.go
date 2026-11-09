@@ -87,6 +87,7 @@ func main() {
 			log.Fatalf("preview: %v", err)
 		}
 		log.Printf("preview on http://%s", *preview)
+		pv.setActions(rend.actions())
 	}
 
 	st := &state{media: Media{Volume: 255}}
@@ -137,6 +138,11 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 		case b := <-spectrum:
 			st.update(func(st *state) { st.media.Bands, st.media.BandsAt = b, time.Now() })
 			continue
+		case name := <-pv.requests():
+			if err := rend.runAction(name); err != nil {
+				say("action %s: %v", name, err)
+			}
+			continue
 		case ev, ok := <-events:
 			if !ok {
 				events = nil
@@ -162,6 +168,7 @@ func run(ctx context.Context, st *state, rend *renderer, pv *previewServer, useD
 				} else {
 					log.Printf("scripts reloaded")
 					pv.setError(nil)
+					pv.setActions(rend.actions())
 				}
 			}
 		}

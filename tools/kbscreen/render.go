@@ -250,6 +250,27 @@ func (r *renderer) display() display {
 	return out
 }
 
+// actions lists what the scripts let you set off by hand (action(name, fn)).
+func (r *renderer) actions() []string {
+	v, err := runBounded(r.vm, func() (goja.Value, error) {
+		return r.vm.RunString("typeof ACTIONS === 'object' ? [...ACTIONS.keys()] : []")
+	})
+	var names []string
+	if err == nil {
+		r.vm.ExportTo(v, &names)
+	}
+	return names
+}
+
+// runAction calls the action of that name.
+func (r *renderer) runAction(name string) error {
+	r.vm.Set("ACTION_NAME", name)
+	_, err := runBounded(r.vm, func() (goja.Value, error) {
+		return r.vm.RunString("(ACTIONS.get(ACTION_NAME) || (() => { throw new Error('no action ' + ACTION_NAME); }))()")
+	})
+	return err
+}
+
 var knobKinds = map[byte]string{eventKnob: "press", eventKnobLong: "long", eventKnobDouble: "double"}
 
 // pressKnob calls knob(kind) with "press", "long" or "double".
