@@ -19,19 +19,19 @@ Each came from a round of mockups or from using it on the keyboard (2026-11-06).
 
 - **Graphics and symbols over text.** Icons (chip, card, memory stick, plug), avatars and meters beat labels. "Vertical displays make text very limited."
 - **Nothing flashes or inverts to get attention.** A blinking inverted row felt aggressive. Motion should be calm: a swaying antenna, scrolling text, moving needles and graphs.
-- **Avatars for agents.** A 9×9 robot per session, its face showing the state: antenna sways while working, `?` when asking, smile when done, hollow and `Z` when idle. Liked more than any text list.
+- **Avatars for agents.** Liked more than any text list. The 9×9 robot board that started it gave way to the farm (below); the robot stays as the asking corner on perf and music.
 - **Graphs are lines, no fill pattern under them.** Levels (RAM, VRAM) are solid tanks, not cells or dithering. 32 per-thread bars were too busy.
 - **Pair what belongs together**: CPU load beside its RAM tank, GPU load beside its VRAM tank, with clear separation (a gap and a dotted line) between the pairs.
 - **Show only what matters now.** The battery appears only while charging or discharging; temperature and power were dropped as not needed; VRAM stays because local LLMs make it matter.
 - **A notification replaces something rather than adding**: the asking robot takes the battery percent's place on perf and the album art's corner on music.
 - **Charging is a plug, not a lightning bolt** (the bolt looked odd at this size).
-- **Recent first, old things fold away.** Agents sort by last update; questions left for days sink into a LATER count with the oldest age, instead of pinning the screen.
-- **The screen never switches itself to demand attention.** Music playing selects the music screen (that is context, not an alert); the agent board is only reached by knob.
+- **Recent first, old things fold away.** Sessions quiet for an hour leave the farm; questions left for days become the mailbox, idle ones a Z from the farmhouse, instead of pinning the screen.
+- **The screen never switches itself to demand attention.** Music playing selects the music screen (that is context, not an alert); otherwise the farm shows.
 - **Right screen:** text bands for layer and mods were rejected, and having no indicators was missed on the keyboard; the original icon set under half the animation was the answer.
 
 ## The agent zoo (farm)
 
-From four rounds on 2026-11-06; the farm is the page that comes up by itself.
+From four rounds on 2026-11-06 (`js/pages/30-farm.js`); the farm is the page that comes up by itself.
 
 - **Where a creature stands says what it is doing** (picked over per-session lanes and one big pet): beds in the middle for work, the fence at the bottom for questions, the farmhouse for sleep. At 0.17 mm a pixel, place reads before faces do.
 - **Farm over construction**: growing then ripe maps onto working then done; an unseen finished turn is a ripe crop waiting to be harvested, and harvests are the progress the events will hang on.

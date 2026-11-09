@@ -49,8 +49,8 @@ func testData(playing bool, agents *Agents) jsData {
 	return toJS(s, []uint8{10, 50, 90}, []uint8{5, 5, 80}, m, agents, now)
 }
 
-// The built-in scripts draw every screen: perf, music while playing, and the
-// agent board after knob presses, with and without Agentique.
+// The built-in scripts draw every screen: the farm by itself, music while
+// playing, perf after a knob press, and the farm without Agentique.
 func TestBuiltInScreensRender(t *testing.T) {
 	r, err := newRenderer("")
 	if err != nil {
@@ -67,9 +67,9 @@ func TestBuiltInScreensRender(t *testing.T) {
 		d       jsData
 		presses int
 	}{
-		{"perf", testData(false, agents), 0},
+		{"farm", testData(false, agents), 0},
 		{"music", testData(true, agents), 0},
-		{"agents", testData(false, agents), 2}, // perf -> music -> agents
+		{"perf", testData(false, agents), 1}, // farm -> perf, round the end
 		{"no agentique", testData(false, nil), 0},
 	} {
 		r.frame(c.d, 0) // lets the script see the context before the presses
@@ -178,16 +178,16 @@ func TestBuiltInKnobAndDisplay(t *testing.T) {
 		t.Fatal(err)
 	}
 	d := testData(false, nil)
-	perf, _ := r.frame(d, 0)
+	auto, _ := r.frame(d, 0)
 	r.pressKnob(eventKnob)
-	music, _ := r.frame(d, 0)
+	next, _ := r.frame(d, 0)
 	r.pressKnob(eventKnobDouble)
-	if f, _ := r.frame(d, 0); !bytes.Equal(f, perf) || bytes.Equal(f, music) {
-		t.Fatal("double press did not go back to perf")
+	if f, _ := r.frame(d, 0); !bytes.Equal(f, auto) || bytes.Equal(f, next) {
+		t.Fatal("double press did not go back a screen")
 	}
 	r.pressKnob(eventKnob)
 	r.pressKnob(eventKnobLong)
-	if f, _ := r.frame(d, 0); !bytes.Equal(f, perf) {
+	if f, _ := r.frame(d, 0); !bytes.Equal(f, auto) {
 		t.Fatal("long press did not go back to the automatic screen")
 	}
 	if disp := r.display(); disp.keepAwake || disp.brightness != 255 {
@@ -224,9 +224,7 @@ func TestNewPageFileIsLoaded(t *testing.T) {
 	d := testData(false, nil)
 	d.Media.VolumeChangedAgo = -1 // no volume readout over the page
 	r.frame(d, 0)
-	for range 3 { // perf -> music -> agents -> zoo
-		r.pressKnob(eventKnob)
-	}
+	r.pressKnob(eventKnob) // farm -> zoo
 	if f, err := r.frame(d, 0); err != nil || bytes.Count(f, []byte{0xFF}) != frameSize {
 		t.Fatalf("the zoo page did not show: %v", err)
 	}
