@@ -58,6 +58,24 @@ page('farm', (function () {
   const DUCKLING = ['.#.', '###'];
   const KINDS = Object.keys(CAST);
 
+  // ---- quirks: a move of its own for each kind, every few minutes ------------
+  // frames are whole sprites shown in turn over len ms (top row at y + dy);
+  // extra(x, y, k, t) draws what happens around it, k from 0 to 1.
+  const QUIRKS = {
+    bun: { len: 1600, frames: [['..#.....', '..#..###', ...CAST.bun.a.slice(2)], CAST.bun.a] }, // an ear flops, twice
+    bot: { len: 1500, extra: (x, y, k) => { const r = Math.round(k * 3); f.px(x + 3 - Math.round(k * 2), y - 1 - r); f.px(x + 4 + Math.round(k * 2), y - 1 - r); } }, // a spark off the antenna
+    cat: { len: 1400, frames: [['.#....#.', '.##..##.', '.######.', '.######.', '.##..##.', '..####..', '.######.', '.#.##.#.']] }, // a yawn, eyes shut
+    owl: { len: 1600, frames: [['.#....#.', '.######.', '#.##.###', '#.##.###', ...CAST.owl.a.slice(4)], CAST.owl.a, ['.#....#.', '.######.', '###.##.#', '###.##.#', ...CAST.owl.a.slice(4)], CAST.owl.a] }, // looks left, then right
+    mush: { len: 1800, extra: (x, y, k) => [[2, 0], [4, 0.15], [5, 0.3]].forEach(([dx, d]) => { const kk = (k - d) / 0.7; if (kk > 0 && kk < 1) f.px(x + dx + Math.round(Math.sin(kk * 6 + dx)), y - 1 - Math.round(kk * 6)); }) }, // puffs spores
+    frog: { len: 1600, frames: [CAST.frog.a, CAST.frog.a, CAST.frog.a, CAST.frog.a, CAST.frog.a, CAST.frog.a, CAST.frog.a, CAST.frog.b, CAST.frog.b, CAST.frog.b],
+      extra: (x, y, k, t) => { // a fly comes by; the tongue gets it
+        if (k < 0.6) f.px(x + 10 + Math.round(Math.sin(t / 90)), y - 1 + Math.round(Math.cos(t / 70)));
+        else if (k < 0.7) for (let i = 6; i <= 10; i++) f.px(x + i, y + 5 - Math.round((i - 6) * 1.5));
+      } },
+    hat: { len: 1400, dy: -2, frames: [['...####.', '...####.', '..######', '........', '........', '..####..', '..#..#..', '..####..', '.######.', '..#..#..']] }, // tips its hat
+    blob: { len: 1200, frames: [CAST.blob.b, CAST.blob.a, CAST.blob.b, CAST.blob.a, CAST.blob.b, CAST.blob.a] }, // jiggles
+  };
+
   // ---- crops: one kind a project ----------------------------------------------
   const STAGES = [['..#..'], ['.#.#.', '..#..'], ['#.#.#', '.###.', '..#..'], ['.#.#.', '#.#.#', '.###.', '..#..', '..#..']];
   const RIPE = {
@@ -93,7 +111,49 @@ page('farm', (function () {
   // ---- the place ---------------------------------------------------------------
   // Bands: sky 0-9, home 10-22, the patch 24-108, the gate 110-127.
   const HOUSE = ['....##....', '..######..', '##########', '.#......#.', '.#.####.#.', '.#.#..#.#.', '.#.####.#.', '.#......#.', '.#...##.#.', '##########'];
-  const CART = ['#######', '#.....#', '#######', '.#...#.'];
+  // What cart sales buy, in order, each swapped in place: [loads sold, part, tier].
+  const UPGRADES = [[1, 'cart', 1], [2, 'gate', 1], [4, 'house', 1], [6, 'cart', 2], [9, 'gate', 2], [12, 'house', 2]];
+  const tierOf = part => (save.tiers || {})[part] || 0;
+  const BARN = ['...####...', '..#....#..', '.#.#..#.#.', '#........#', '##########', '#.#....#.#', '#..#..#..#', '#...##...#', '#..#..#..#', '##########'];
+  const CARTS = [
+    { rows: ['#######', '#.....#', '#######', '.#...#.'], y: 18, load: [17, 16, 15], lx: 0, dots: '.#.#.#.' }, // a handcart
+    { rows: ['#.#.#.#', '#######', '#.....#', '#######', '.#...#.'], y: 17, load: [16, 15, 14], lx: 0, dots: '.#.#.#.' }, // a crate cart
+    { rows: ['.#####.', '#.....#', '#.....#', '#######', '#.....#', '#######', '.#...#.'], y: 15, load: [19, 17, 16], lx: 1, dots: '#.#.#' }, // a covered wagon
+  ];
+  // Draws a part at a tier; share < 1 while it is being built (an upgrade).
+  const draw = (rows, x, y, share) => (share < 1 ? fade(rows, x, y, share) : f.sprite(rows, x, y));
+  function house(tier, share, t) {
+    if (tier < 2) {
+      draw(HOUSE, 0, 11, share);
+      if (tier === 1) { draw(['##', '##', '##'], 7, 8, share); draw(['#.#', '###'], 2, 18, share); } // a chimney, a window box
+    } else {
+      draw(BARN, 0, 11, share);
+      draw(['.', '#', '#'], 5, 8, share); // the windmill vane, turning slowly
+      draw(Math.floor(t / 900) % 2 ? ['.#.', '###', '.#.'] : ['#.#', '.#.', '#.#'], 4, 6, share);
+    }
+  }
+  const windowAt = () => (tierOf('house') === 2 ? [4, 13] : [4, 16]);
+  const smokeAt = () => (tierOf('house') === 1 ? [7, 7] : [7, 11]);
+  function cart(tier, x, load, share) {
+    const k = CARTS[tier];
+    draw(k.rows, x, k.y, share);
+    for (let r = 0; r < load; r++) draw([k.dots], x + k.lx, k.load[r], share);
+  }
+  function gate(tier, share) {
+    if (tier === 0) {
+      draw(['#........#', '#........#', '#........#', '##########', '#..#..#..#', '#..#..#..#', '#..#..#..#', '##########', '#........#', '#........#'], 11, 118, share);
+      return;
+    }
+    // pickets with pointed tops between the posts
+    draw(['#........#', '#.#.#.#.##', '#.#.#.#.##', '##########', '#.#.#.#.##', '#.#.#.#.##', '#.#.#.#.##', '##########', '#.#.#.#.##', '#........#'], 11, 118, share);
+    if (tier === 2) { // a stone arch over it
+      const arch = [];
+      for (let x = 10; x <= 21; x++) arch.push([x, 117 - Math.round(Math.sqrt(Math.max(0, 36 - (x - 15.5) * (x - 15.5))))]);
+      arch.forEach(([x, y]) => (share < 1 ? ((x * 7) % 10) / 10 < share : true) && f.px(x, y));
+      draw(['##', '#.', '##', '.#', '##', '#.', '##', '.#', '##', '#.', '##'], 10, 117, share);
+      draw(['##', '.#', '##', '#.', '##', '.#', '##', '#.', '##', '.#', '##'], 20, 117, share);
+    }
+  }
   const MAILBOX = ['.#####.', '#.....##', '#.###.##', '#.....#.', '.#####..', '...#....', '...#....', '...#....', '...#....'];
   const DOOR = [1, 12];       // where a creature goes in
   const PORCH = [[10, 13], [17, 13]];
@@ -126,9 +186,20 @@ page('farm', (function () {
   function creature(m, pose, t) {
     const c = CAST[m.kind];
     let rows = pose === 'sleep' ? sleepRows(c) : pose === 'water' ? c.a : (Math.floor(t / (pose === 'walk' ? 160 : 500) + m.sd) % 2 ? c.b : c.a);
-    rows = sized(rows, m.r.context);
-    const w = rows[0].length, x = Math.round(m.x) - (w > 8 ? 1 : 0), y = Math.round(m.y) + 8 - rows.length + (pose === 'done' ? hop(t, m.sd) : 0);
+    // now and then, standing or working, its quirk: the first within a few
+    // minutes of arriving, then every 3 to 9 minutes
+    const q = QUIRKS[m.kind];
+    if (!m.quirkAt) m.quirkAt = t + (60 + Math.random() * 240) * 1000;
+    if (pose === 'walk' || pose === 'sleep') { if (m.quirk && t - m.quirk < q.len) m.quirk = 0; }
+    else if (t >= m.quirkAt) { m.quirk = t; m.quirkAt = t + (180 + Math.random() * 360) * 1000; }
+    const qk = m.quirk ? (t - m.quirk) / q.len : 1;
+    let dy = 0;
+    if (qk < 1 && q.frames) { rows = q.frames[Math.min(Math.floor(qk * q.frames.length), q.frames.length - 1)]; dy = q.dy || 0; }
+    if (rows.length === 8) rows = sized(rows, m.r.context);
+    const w = rows[0].length, x = Math.round(m.x) - (w > 8 ? 1 : 0);
+    const y = Math.round(m.y) + 8 - (dy ? 8 : rows.length) + dy + (pose === 'done' ? hop(t, m.sd) : 0);
     f.sprite(rows, x, y);
+    if (qk < 1 && q.extra) q.extra(x, y - dy, qk, t);
     if (pose === 'water') { // the can, tipped now and then over its plant
       const ph = (t + m.sd * 137) % 1600, tip = ph > 900;
       const can = tip ? ['.##..', '#####', '####.', '....#'] : ['.##..', '####.', '#####'];
@@ -432,8 +503,20 @@ page('farm', (function () {
       end: () => { save.harvest = Math.max(0, save.harvest - 9); save.sold = (save.sold || 0) + 1; },
       draw: (c, k) => {
         cartAway = true;
-        if (k < 0.4) { const x = Math.round(lerp(25, 33, k / 0.4)); f.sprite(CART, x, 18); for (let r = 0; r < 3; r++) f.sprite(['.#.#.#.'], x, 17 - r); }
-        else if (k > 0.6) f.sprite(CART, Math.round(lerp(33, 25, (k - 0.6) / 0.4)), 18);
+        if (k < 0.4) cart(tierOf('cart'), Math.round(lerp(25, 33, k / 0.4)), 3, 1);
+        else if (k > 0.6) cart(tierOf('cart'), Math.round(lerp(33, 25, (k - 0.6) / 0.4)), 0, 1);
+      },
+    },
+    { // what the loads sold have paid for: the next upgrade is built in place
+      name: 'upgrade', len: 5000, every: 0,
+      when: () => UPGRADES.some(([n, part, tier]) => (save.sold || 0) >= n && tierOf(part) < tier),
+      start: c => { c.ev.up = UPGRADES.find(([n, part, tier]) => (save.sold || 0) >= n && tierOf(part) < tier); },
+      end: c => { const [, part, tier] = c.ev.up; save.tiers = Object.assign(save.tiers || {}, { [part]: tier }); },
+      draw: (c, k, t) => {
+        const [, part, tier] = c.ev.up;
+        if (part === 'house') house(tier, k, t);
+        else if (part === 'cart') { if (!cartAway) cart(tier, 25, Math.min(Math.floor((save.harvest || 0) / 3), 3), k); }
+        else gate(tier, k);
       },
     },
     { // twenty harvests in all: a scarecrow goes up beside the lane, and stays
@@ -536,16 +619,13 @@ page('farm', (function () {
     // home: the house (snow on the roof, the flag after a merge, the window lit
     // with someone asleep inside or smoke when someone works indoors), the
     // porch, the cart with its load in rows of three
-    f.sprite(HOUSE, 0, 11);
-    if (w.sky === 'snow') f.sprite(['....##....', '..######..'], 0, 10);
-    if (w.night || insideIdle || (a && a.laterIdle)) f.fill(4, 16, 2, 1);
-    if (insideBusy) for (let i = 0; i < 3; i++) { const p = ((t / 900) + i / 3) % 1; f.px(7 + Math.round(Math.sin(p * 6 + i)), 11 - Math.round(p * 9)); }
+    house(tierOf('house'), 1, t);
+    if (w.sky === 'snow') f.sprite(tierOf('house') === 2 ? ['...####...', '..#....#..'] : ['....##....', '..######..'], 0, 10);
+    if (w.night || insideIdle || (a && a.laterIdle)) f.fill(windowAt()[0], windowAt()[1], 2, 1);
+    if (insideBusy) { const [sx, sy] = smokeAt(); for (let i = 0; i < 3; i++) { const p = ((t / 900) + i / 3) % 1; f.px(sx + Math.round(Math.sin(p * 6 + i)), sy - Math.round(p * 7)); } }
     if ((save.flagUntil || 0) > Date.now()) { f.fill(9, 3, 1, 8); f.sprite(Math.floor(t / 600) % 2 ? ['###', '##.', '#..'] : ['##.', '###', '#..'], 10, 3); }
     for (let x = 10; x < 25; x++) f.px(x, 21);
-    if (!cartAway) {
-      f.sprite(CART, 25, 18);
-      for (let r = 0; r < Math.min(Math.floor((save.harvest || 0) / 3), 3); r++) f.sprite(['.#.#.#.'], 25, 17 - r);
-    }
+    if (!cartAway) cart(tierOf('cart'), 25, Math.min(Math.floor((save.harvest || 0) / 3), 3), 1);
     // the lane, worn only at its ends: by the porch and at the gate
     [[15, 24], [14, 27], [16, 30]].forEach(([x, y]) => f.fill(x, y, 2, 1));
     [[13, 104], [16, 105], [14, 107], [17, 108], [15, 109]].forEach(([x, y]) => f.px(x, y));
@@ -556,9 +636,7 @@ page('farm', (function () {
     if (save.snowman && Date.now() - save.snowman < 48 * 60 * MIN && w.temp <= 3) f.sprite(SNOWMAN, SNOWMAN_AT[0], SNOWMAN_AT[1]);
     // the gate in the middle, a stub of fence either side, the mailbox on the right one
     [[0, 9], [22, 31]].forEach(([x0, x1]) => { for (let x = x0; x <= x1; x++) { f.px(x, 122); f.px(x, 125); } f.fill(x0 + 1, 121, 1, 7); f.fill(x1 - 1, 121, 1, 7); });
-    f.fill(11, 118, 1, 10); f.fill(20, 118, 1, 10);
-    for (let x = 12; x < 20; x++) { f.px(x, 121); f.px(x, 125); }
-    f.fill(14, 122, 1, 3); f.fill(17, 122, 1, 3);
+    gate(tierOf('gate'), 1);
     if (a && a.laterWaiting) f.sprite(MAILBOX, 24, 111);
   }
 
