@@ -8,6 +8,6 @@
 // slow for dungeon mode, which changes most of the frame at once.
 #define I2C1_CLOCK_SPEED 400000
 
-// Dungeon mode sends the right OLED's frame to that half in chunks (game.c).
+// Dungeon mode sends the right OLED's frame to that half in chunks (game.c),
+// within QMK's default 32-byte RPC buffer.
 #define SPLIT_TRANSACTION_IDS_USER USER_SYNC_DUNGEON
-#define RPC_M2S_BUFFER_SIZE 64

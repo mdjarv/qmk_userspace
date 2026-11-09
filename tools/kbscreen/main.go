@@ -403,6 +403,6 @@ func logData(ctx context.Context, st *state) {
 // the keymap's hostdata.h): render cost, main loop rate, the split link.
 func logDungeon(d []byte) {
 	u16 := func(i int) int { return int(d[i]) | int(d[i+1])<<8 }
-	log.Printf("dungeon: render max %dus mean %dus x%d, %d loops/s, split sent %d failed %d, other half has %d chunks, showing %v",
-		u16(0), u16(2), d[4], u16(5), u16(7), u16(9), d[11], d[12] != 0)
+	log.Printf("dungeon: render max %dus mean %dus x%d, %d loops/s, split sent %d failed %d (slowest failure %dus), other half has %d chunks, showing %v",
+		u16(0), u16(2), d[4], u16(5), u16(7), u16(9), u16(13), d[11], d[12] != 0)
 }

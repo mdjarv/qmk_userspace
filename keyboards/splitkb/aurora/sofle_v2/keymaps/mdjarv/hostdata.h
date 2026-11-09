@@ -30,7 +30,8 @@ enum host_event_kind {
     // Once a second in dungeon mode, for kbscreen's log (game.c): [2..3] slowest
     // render us  [4..5] mean render us  [6] renders  [7..8] main loops  [9..10]
     // split transfers sent  [11..12] failed  [13] chunks the other half has
-    // received (mod 256)  [14] whether it shows them. Numbers little-endian.
+    // received (mod 256)  [14] whether it shows them  [15..16] the slowest
+    // failed transfer in us. Numbers little-endian.
     HOST_EVENT_DUNGEON = 5,
 };
 
