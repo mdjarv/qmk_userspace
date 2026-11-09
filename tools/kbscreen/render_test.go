@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -296,5 +297,41 @@ func TestPagesSeeAgentTotals(t *testing.T) {
 	r.checkpoint()
 	if r.saveJSON != `{"turns":3945}` {
 		t.Fatalf("save = %s", r.saveJSON)
+	}
+}
+
+// The farm keeps going behind another page: with music on screen, a session
+// that works gets its bed, and once it is done and seen its crop is harvested.
+func TestFarmRunsWhileHidden(t *testing.T) {
+	r, err := newRenderer("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var saved struct {
+		Harvest int                        `json:"harvest"`
+		Crops   map[string]json.RawMessage `json:"crops"`
+	}
+	step := func(state uint8) {
+		t.Helper()
+		a := &Agents{Rows: []AgentRow{{Name: "QMK", State: state, ID: "s1"}}, Sessions: []Session{{ID: "s1", Name: "QMK", State: state}}}
+		for i := range 3 {
+			if _, err := r.frame(testData(true, a), int64(i)*50); err != nil { // music playing: the farm is not drawn
+				t.Fatal(err)
+			}
+		}
+		r.checkpoint()
+		saved.Crops = nil
+		if err := json.Unmarshal([]byte(r.saveJSON), &saved); err != nil {
+			t.Fatal(err)
+		}
+	}
+	step(agentWorking)
+	if _, ok := saved.Crops["s1"]; !ok {
+		t.Fatalf("no bed for a session working behind the music page: %s", r.saveJSON)
+	}
+	step(agentDone)
+	step(agentIdle)
+	if saved.Harvest != 1 || saved.Crops["s1"] != nil {
+		t.Fatalf("the crop was not harvested behind the music page: %s", r.saveJSON)
 	}
 }

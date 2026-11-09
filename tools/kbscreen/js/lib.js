@@ -93,6 +93,11 @@ const f = new Frame();
 const PAGES = [];
 function page(name, draw) { PAGES.push({ name, draw }); }
 
+// What runs every frame whichever page shows (a game that keeps going while
+// another page is on screen), before the page draws. tick(fn) with fn(d, t).
+const TICKS = [];
+function tick(fn) { TICKS.push(fn); }
+
 // Whether an agent asked something in the last 10 minutes.
 const asking = d => d.agents && d.agents.newQuestion;
 

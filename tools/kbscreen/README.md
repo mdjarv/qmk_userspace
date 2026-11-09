@@ -15,7 +15,7 @@ The service runs the repo's `js/` (`make screen-install` points it there) and se
 
 Files load in this order, into one global scope:
 
-- `lib.js`: `Frame` (a 512-byte buffer in OLED layout with `px`, `fill`, `rect`, `dotted`, `text`/`glyph` in the keyboard's 6x8 font, `tiny`/`tinyRight` in a 3x5 font, `sprite` from `'#'` rows, `pages` for raw bytes), `W` = 32, `H` = 128, and what pages share: `f` (the frame they draw into, cleared before each page), `page(name, draw)`, `robot(x, y, state, t, i)` (the 9x9 agent avatar), `asking(d)`, and `display`.
+- `lib.js`: `Frame` (a 512-byte buffer in OLED layout with `px`, `fill`, `rect`, `dotted`, `text`/`glyph` in the keyboard's 6x8 font, `tiny`/`tinyRight` in a 3x5 font, `sprite` from `'#'` rows, `pages` for raw bytes), `W` = 32, `H` = 128, and what pages share: `f` (the frame they draw into, cleared before each page), `page(name, draw)`, `tick(fn)` (an `fn(d, t)` that runs every frame before the page draws, whichever page shows: for a game that keeps going behind other pages), `robot(x, y, state, t, i)` (the 9x9 agent avatar), `asking(d)`, and `display`.
 - `pages/*.js` in name order, one page each. A page registers a `draw(d, t)` that draws into `f`; the file name's number sets the knob order. Keep a page's helpers inside its wrapping function so pages cannot clash:
   ```js
   'use strict';

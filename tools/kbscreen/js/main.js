@@ -46,6 +46,7 @@ function render(d, t) {
   shown = override || ctx;
   display.keepAwake = d.media.playing;
   display.brightness = night(d) ? 40 : 255;
+  TICKS.forEach(fn => fn(d, t));
   f.clear();
   PAGES.find(p => p.name === shown).draw(d, t);
   if (d.media.volume >= 0 && d.media.volumeChangedAgo >= 0 && d.media.volumeChangedAgo < 1500) volume(d.media);
