@@ -391,7 +391,7 @@ page('farm', (function () {
       if (s && s.state === 'archived' && s.merged) {
         m.leaving = 'gate'; m.carry = m.ripe; save.flagUntil = now + 60 * 60000;
       } else m.leaving = 'home';
-      if (s && s.state === 'archived') save.departed = (save.departed || 0) + 1;
+      if (s && s.state === 'archived') { save.departed = (save.departed || 0) + 1; save.homedWeek = (save.homedWeek || 0) + 1; }
       m.corner = undefined;
     });
 
@@ -496,7 +496,55 @@ page('farm', (function () {
   const growingPlant = () => [...mobs.values()].find(m => m.corner !== undefined && m.busy);
   let cartAway = false;
 
+  // The week, from Monday 06:00: the meteor comes once a week, the first time
+  // the farm is on screen after that.
+  function weekOf(now) {
+    const d = new Date(now), back = (d.getDay() + 6) % 7;
+    const monday = new Date(d.getFullYear(), d.getMonth(), d.getDate() - back, 6);
+    if (now < monday.getTime()) monday.setDate(monday.getDate() - 7);
+    return monday.toDateString();
+  }
+  const IMPACT = [15, 62], CRATER = ['..#####..', '.#.....#.', '#.#.#.#.#'];
+
   const EVENTS = [
+    { // first thing in the week: a meteor. It clears the week (the ones who
+      // went home rise as ghosts, the corners are handed out afresh, the cart
+      // load is gone) and keeps what was earned; the crater stays the morning.
+      name: 'meteor', len: 12000, every: 0,
+      when: c => {
+        if (save.homedWeek === undefined) save.homedWeek = save.departed || 0;
+        return save.meteorWeek !== weekOf(c.now);
+      },
+      start: c => { c.ev.ghosts = Math.min(save.homedWeek || 0, 5); },
+      end: c => {
+        Object.values(save.projects || {}).forEach(p => delete p.corner);
+        save.harvest = 0; save.homedWeek = 0;
+        save.meteorWeek = weekOf(c.now);
+        save.crater = c.now;
+      },
+      draw: (c, k, t) => {
+        const [ix, iy] = IMPACT;
+        if (k < 0.25) { // the streak, from the top right
+          const kk = k / 0.25, x = Math.round(lerp(34, ix, kk)), y = Math.round(lerp(-4, iy, kk));
+          f.fill(x - 1, y - 1, 3, 3);
+          for (let i = 1; i < 6; i++) f.px(x + i, y - Math.round(i * 4.2));
+          return;
+        }
+        if (k < 0.45) { // the ring, spreading
+          const r = lerp(2, 20, (k - 0.25) / 0.2);
+          for (let a = 0; a < 40; a++) if (a % 2 === 0) f.px(ix + Math.cos(a / 40 * Math.PI * 2) * r, iy + Math.sin(a / 40 * Math.PI * 2) * r * 1.4);
+        }
+        if (k < 0.75) for (let i = 0; i < 12; i++) { // dust, settling
+          const kk = (k - 0.25) / 0.5, a = i * 2.4;
+          f.px(ix + Math.cos(a) * (6 + i) * kk * 1.2, iy - 8 * Math.sin(kk * Math.PI) + Math.sin(a) * (4 + i / 2) + kk * 6);
+        }
+        f.sprite(CRATER, ix - 4, iy - 1);
+        for (let i = 0; i < (c.ev.ghosts || 0); i++) { // the week's homecomers rise from the house
+          const kk = (k - 0.4 - i * 0.06) / 0.5;
+          if (kk > 0 && kk < 1) fade(SOUL, 1 + i * 5, Math.round(lerp(10, -10, kk)), kk < 0.6 ? 0.8 : 0.8 * (1 - kk) / 0.4);
+        }
+      },
+    },
     { // a full load: the cart drives off with it and comes back empty
       name: 'cart', len: 10000, every: 0,
       when: () => (save.harvest || 0) >= 9,
@@ -631,6 +679,7 @@ page('farm', (function () {
     [[13, 104], [16, 105], [14, 107], [17, 108], [15, 109]].forEach(([x, y]) => f.px(x, y));
     // the corners that belong to a project: a mound each
     Object.values(save.projects || {}).forEach(p => { if (p.corner !== undefined) { const c = CORNERS[p.corner]; f.sprite(['.###.'], c.px, c.y + 8); } });
+    if (save.crater && Date.now() - save.crater < 6 * 60 * MIN) f.sprite(CRATER, IMPACT[0] - 4, IMPACT[1] - 1);
     // what the farm has earned stays: the scarecrow, a snowman while it lasts
     if ((save.unlocked || {}).scarecrow) f.sprite(SCARECROW, SCARECROW_AT[0], SCARECROW_AT[1]);
     if (save.snowman && Date.now() - save.snowman < 48 * 60 * MIN && w.temp <= 3) f.sprite(SNOWMAN, SNOWMAN_AT[0], SNOWMAN_AT[1]);
