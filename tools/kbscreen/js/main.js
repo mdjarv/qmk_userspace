@@ -5,7 +5,7 @@
 // change within a second; a version that fails to load leaves the last good
 // one running.
 //
-// Music playing shows music, otherwise the farm (the agent zoo). A knob press shows the next page
+// Music playing shows music, otherwise the farm and the fishing page in turns. A knob press shows the next page
 // until that choice changes, a double press the previous one, a long press
 // goes back to the automatic choice. The screens stay on while music plays,
 // and dim at night. A volume change shows over any page for 1.5 s.
@@ -14,7 +14,15 @@
 let shown = null, override = null, overrideContext = null, lastData = null;
 
 const has = name => PAGES.some(p => p.name === name);
-const context = d => (d.media.playing && has('music') ? 'music' : has('farm') ? 'farm' : has('perf') ? 'perf' : PAGES[0].name);
+// Without music the farm and the fishing page take turns, ten minutes each.
+const ROTATION = ['farm', 'fishing'], TURN_MS = 10 * 60000;
+let now = 0;
+function context(d) {
+  if (d.media.playing && has('music')) return 'music';
+  const turns = ROTATION.filter(has);
+  if (turns.length) return turns[Math.floor(now / TURN_MS) % turns.length];
+  return has('perf') ? 'perf' : PAGES[0].name;
+}
 
 function knob(kind) {
   if (kind === 'long') { override = null; return; }
@@ -40,7 +48,7 @@ function volume(m) {
 }
 
 function render(d, t) {
-  lastData = d;
+  lastData = d; now = t;
   const ctx = context(d);
   if (override && (ctx !== overrideContext || !has(override))) override = null;
   shown = override || ctx;
