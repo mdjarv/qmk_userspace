@@ -439,7 +439,7 @@ page('farm', (function () {
       } else { m.tx = DOOR[0]; m.ty = DOOR[1]; m.indoors = true; } // no corner free: it works indoors
     });
     mobs.forEach((m, id) => {
-      m.moving = walk(m, dt, LANE);
+      m.moving = wipe ? false : walk(m, dt, LANE);
       if (m.leaving && !m.moving) mobs.delete(id);
       else if (m.indoors && !m.moving) { if (m.r.state === 'idle') insideIdle++; else insideBusy++; }
     });
@@ -470,7 +470,7 @@ page('farm', (function () {
         c.leaving = s && s.state === 'archived' && s.merged ? 'gate' : 'home';
         if (c.leaving === 'gate') { c.tx = LANE + 1; c.ty = 136; } else { c.tx = DOOR[0]; c.ty = DOOR[1] + 2; }
       }
-      c.moving = walk(c, dt, LANE + 1);
+      c.moving = wipe ? false : walk(c, dt, LANE + 1);
       if (c.leaving && !c.moving) kids.delete(id);
     });
   });
@@ -495,6 +495,7 @@ page('farm', (function () {
   const clockMin = s => (s && s.length >= 5 ? Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5)) : -1);
   const growingPlant = () => [...mobs.values()].find(m => m.corner !== undefined && m.busy);
   let cartAway = false;
+  let wipe = 0; // when the meteor hit: from then to the scene's end, every creature lies dead
 
   // The week, from Monday 06:00: the meteor comes once a week, the first time
   // the farm is on screen after that.
@@ -504,7 +505,17 @@ page('farm', (function () {
     if (now < monday.getTime()) monday.setDate(monday.getDate() - 7);
     return monday.toDateString();
   }
-  const IMPACT = [15, 62], CRATER = ['..#####..', '.#.....#.', '#.#.#.#.#'];
+  const IMPACT = [15, 62], CRATER = ['...#####...', '.##.....##.', '#..#.#.#..#', '.#########.'];
+  // Moves the whole frame by (dx, dy): the meteor shakes the screen.
+  function shake(dx, dy) {
+    if (!dx && !dy) return;
+    const old = f.buf.slice();
+    f.clear();
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+      const sx = x - dx, sy = y - dy;
+      if (sx >= 0 && sx < W && sy >= 0 && sy < H && (old[sx + (sy >> 3) * W] >> (sy & 7)) & 1) f.px(x, y);
+    }
+  }
 
   // ---- seasons and the calendar --------------------------------------------------
   // The season changes the ground, not the cast: marks in the gaps the corners
@@ -583,39 +594,70 @@ page('farm', (function () {
     { // first thing in the week: a meteor. It clears the week (the ones who
       // went home rise as ghosts, the corners are handed out afresh, the cart
       // load is gone) and keeps what was earned; the crater stays the morning.
-      name: 'meteor', len: 12000, every: 0,
+      name: 'meteor', len: 14000, every: 0,
       when: c => {
         if (save.homedWeek === undefined) save.homedWeek = save.departed || 0;
         return save.meteorWeek !== weekOf(c.now);
       },
-      start: c => { c.ev.ghosts = Math.min(save.homedWeek || 0, 5); },
+      start: c => {
+        c.ev.ghosts = Math.min(save.homedWeek || 0, 5);
+        c.ev.rocks = Array.from({ length: 12 }, (_, i) => ({ a: -Math.PI / 2 + (i - 5.5) * 0.28, v: 26 + (i * 37) % 23 }));
+      },
       end: c => {
         Object.values(save.projects || {}).forEach(p => delete p.corner);
+        // a new generation: tick brings one out of the house for every live session
+        mobs.clear(); kids.clear(); save.crops = {}; wipe = 0;
         save.harvest = 0; save.homedWeek = 0;
         save.meteorWeek = weekOf(c.now);
         save.crater = c.now;
       },
       draw: (c, k, t) => {
-        const [ix, iy] = IMPACT;
-        if (k < 0.25) { // the streak, from the top right
-          const kk = k / 0.25, x = Math.round(lerp(34, ix, kk)), y = Math.round(lerp(-4, iy, kk));
-          f.fill(x - 1, y - 1, 3, 3);
-          for (let i = 1; i < 6; i++) f.px(x + i, y - Math.round(i * 4.2));
+        const [ix, iy] = IMPACT, HIT = 0.28;
+        if (k < HIT) { // it comes in from the top right, growing, trailing fire
+          const kk = k / HIT, e = kk * kk, x = lerp(40, ix, e), y = lerp(-14, iy, e), r = 1 + Math.round(kk * 2.5);
+          for (let i = 1; i < 14; i++) { // the trail, wider near the head, sparks off it
+            const tx = x + i * 1.1, ty = y - i * 2.6, w = Math.max(0, r - Math.floor(i / 4));
+            for (let j = -w; j <= w; j++) if ((i + j + Math.floor(t / 60)) % 3 !== 0) f.px(tx + j, ty);
+          }
+          for (let yy = -r; yy <= r; yy++) for (let xx = -r; xx <= r; xx++) if (xx * xx + yy * yy <= r * r + 1) f.px(x + xx, y + yy);
           return;
         }
-        if (k < 0.45) { // the ring, spreading
-          const r = lerp(2, 20, (k - 0.25) / 0.2);
-          for (let a = 0; a < 40; a++) if (a % 2 === 0) f.px(ix + Math.cos(a / 40 * Math.PI * 2) * r, iy + Math.sin(a / 40 * Math.PI * 2) * r * 1.4);
+        const after = (k - HIT) / (1 - HIT), ms = after * 14000 * (1 - HIT);
+        if (!wipe) wipe = t;
+        // the flash: the whole screen, once, then dissolving
+        if (ms < 120) { f.fill(0, 0, W, H); return; }
+        if (ms < 600) { const share = 1 - (ms - 120) / 480; for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (((x * 37 + y * 91 + x * y * 13) % 100) / 100 < share) f.px(x, y); }
+        // two shockwaves crossing the whole screen
+        [0, 350].forEach(delay => {
+          const r = (ms - delay) / 1600 * 90;
+          if (r > 0 && r < 90) for (let a = 0; a < 90; a++) {
+            const th = a / 90 * Math.PI * 2;
+            f.px(ix + Math.cos(th) * r, iy + Math.sin(th) * r * 1.3);
+            f.px(ix + Math.cos(th) * (r - 1), iy + Math.sin(th) * (r - 1) * 1.3);
+          }
+        });
+        // rocks flung out, falling back
+        const s = ms / 1000;
+        c.ev.rocks.forEach(rk => {
+          const x = ix + Math.cos(rk.a) * rk.v * s, y = iy + Math.sin(rk.a) * rk.v * s + 30 * s * s;
+          if (s < 2.5 && y < 125) f.fill(Math.round(x), Math.round(y), 2, 2);
+        });
+        // the dust cloud: billows up and out, then settles
+        if (s < 6) for (let i = 0; i < 40; i++) {
+          const a = i * 2.39996, rr = (3 + (i * 7) % 13) * Math.min(1, s / 1.2) * 1.2, settle = Math.max(0, s - 2) * 4;
+          if (((i * 13) % 10) / 10 < Math.min(1, (6 - s) / 3)) f.px(ix + Math.cos(a) * rr * 1.3, iy + Math.sin(a) * rr * 0.6 - Math.min(s, 1.5) * 5 + settle);
         }
-        if (k < 0.75) for (let i = 0; i < 12; i++) { // dust, settling
-          const kk = (k - 0.25) / 0.5, a = i * 2.4;
-          f.px(ix + Math.cos(a) * (6 + i) * kk * 1.2, iy - 8 * Math.sin(kk * Math.PI) + Math.sin(a) * (4 + i / 2) + kk * 6);
-        }
-        f.sprite(CRATER, ix - 4, iy - 1);
-        for (let i = 0; i < (c.ev.ghosts || 0); i++) { // the week's homecomers rise from the house
-          const kk = (k - 0.4 - i * 0.06) / 0.5;
+        // the crater, smoking
+        f.sprite(CRATER, ix - 5, iy - 2);
+        for (let i = 0; i < 6; i++) { const p = ((t / 1400) + i / 6) % 1; f.px(ix + Math.round(Math.sin(p * 7 + i) * 2), iy - 3 - Math.round(p * 16)); }
+        // the week's homecomers rise from the house
+        for (let i = 0; i < (c.ev.ghosts || 0); i++) {
+          const kk = (after - 0.3 - i * 0.07) / 0.5;
           if (kk > 0 && kk < 1) fade(SOUL, 1 + i * 5, Math.round(lerp(10, -10, kk)), kk < 0.6 ? 0.8 : 0.8 * (1 - kk) / 0.4);
         }
+        // the ground shakes: hard at the hit, dying away over three seconds
+        c.shake = s < 3 ? Math.round(3 * (1 - s / 3) * (Math.floor(t / 40) % 2 ? 1 : -1)) : 0;
+        c.shakeY = s < 3 ? Math.round(2 * (1 - s / 3) * (Math.floor(t / 55) % 2 ? 1 : -1)) : 0;
       },
     },
     { // a full load: the cart drives off with it and comes back empty
@@ -757,7 +799,11 @@ page('farm', (function () {
     if (maypoleUp(today) && (save.events || {}).maypole === today.getFullYear()) f.sprite(MAYPOLE, MAYPOLE_AT[0], MAYPOLE_AT[1]);
     // the corners that belong to a project: a mound each
     Object.values(save.projects || {}).forEach(p => { if (p.corner !== undefined) { const c = CORNERS[p.corner]; f.sprite(['.###.'], c.px, c.y + 8); } });
-    if (save.crater && Date.now() - save.crater < 6 * 60 * MIN) f.sprite(CRATER, IMPACT[0] - 4, IMPACT[1] - 1);
+    if (save.crater && Date.now() - save.crater < 6 * 60 * MIN) { // the crater, a wisp of smoke now and then
+      f.sprite(CRATER, IMPACT[0] - 5, IMPACT[1] - 2);
+      const p = (t / 2600) % 1;
+      if (p < 0.5) f.px(IMPACT[0] + Math.round(Math.sin(p * 9)), IMPACT[1] - 3 - Math.round(p * 16));
+    }
     // what the farm has earned stays: the scarecrow, a snowman while it lasts
     if ((save.unlocked || {}).scarecrow) f.sprite(SCARECROW, SCARECROW_AT[0], SCARECROW_AT[1]);
     if (save.snowman && Date.now() - save.snowman < 48 * 60 * MIN && w.temp <= 3) f.sprite(SNOWMAN, SNOWMAN_AT[0], SNOWMAN_AT[1]);
@@ -776,10 +822,20 @@ page('farm', (function () {
     // grown-ups in depth order
     mobs.forEach(m => {
       const c = CORNERS[m.corner];
-      if (!c || !m.growing) return;
+      if (!c || !m.growing || wipe) return; // the meteor takes the plants too
       const crop = project(m.r.name).crop;
       plant(m.ripe ? RIPE[crop] : STAGES[Math.min(Math.floor(workOf(m) / GROW_MS), STAGES.length - 1)], c.px, c.y + 7);
     });
+    if (wipe) { // struck: every creature keels over where it stood and its ghost rises
+      const age = t - wipe;
+      [...mobs.values(), ...kids.values()].filter(m => !(m.indoors && !m.moving)).forEach((m, i) => {
+        const x = Math.round(m.x), y = Math.round(m.y), big = !!m.r && mobs.has(m.r.id) && m === mobs.get(m.r.id);
+        const body = big ? sleepRows(CAST[m.kind]) : MINI_SLEEP, soul = big ? SOUL : ['.#.', '#.#', '###', '#.#'];
+        fade(body, x, y, age < 1500 ? 1 : Math.max(0, 1 - (age - 1500) / 2000));
+        const kk = (age - 1200 - (i % 5) * 250) / 3500;
+        if (kk > 0 && kk < 1) fade(soul, x + Math.round(Math.sin(age / 300 + i)), y - Math.round(kk * Math.min(30, y + 4)), kk < 0.6 ? 1 : (1 - kk) / 0.4);
+      });
+    } else {
     kids.forEach(c => child(c, t));
     [...mobs.values()].filter(m => !(m.indoors && !m.moving)).sort((p, q) => p.y - q.y).forEach(m => {
       const s = m.r.state, c = CORNERS[m.corner];
@@ -789,8 +845,11 @@ page('farm', (function () {
       if (s === 'waiting' && !m.moving && !m.leaving) f.tiny('?', Math.round(m.x) + 3, top - 6);
       if (m.leaving === 'gate' && m.carry) f.sprite(RIPE[project(m.r.name).crop].slice(0, 4), Math.round(m.x) + 2, top - 5);
     });
+    }
 
     const now = Date.now();
-    events({ a, w, now, today: new Date(now).toDateString(), minutes: clockMin(d.sys.clock), ev: {} }, t);
+    const c = { a, w, now, today: new Date(now).toDateString(), minutes: clockMin(d.sys.clock), ev: {} };
+    events(c, t);
+    shake(c.shake || 0, c.shakeY || 0);
   };
 })());
