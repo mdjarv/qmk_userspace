@@ -1,10 +1,13 @@
-// farm: the agent zoo. Every Agentique session is a creature on a farm, and
-// where it stands says what it is doing: watering its crop bed while it works,
-// at the fence with a ? when it asks, beside a ripe crop when it is done,
-// asleep by the farmhouse when idle. A session another one started is its
-// child; an archived one dies and its ghost rises. Weather, night and the
-// events (cart, scarecrow, balloon, rainbow, crow...) go over everything. What
-// lasts (crops, harvests, unlocks, cooldowns) is in kbscreen's save object.
+// farm: the agent zoo. Every Agentique session is a creature on a farm laid
+// out in bands: sky, home (house, porch, cart), the patch (a corner for each
+// project along a lane) and the gate. Distance from the gate is how much an
+// agent needs you: asking at the gate, a ripe crop in its corner, tending its
+// corner, asleep on the porch, behind the lit window. A session another one
+// started is its child; an archived one walks home through the door, a merged
+// one leaves through the gate carrying its crop and a flag goes up. The
+// creature's size is how full its context window is. Weather, night and the
+// events go over everything. What lasts (projects, crops, harvests, unlocks,
+// cooldowns) is in kbscreen's save object.
 'use strict';
 
 page('farm', (function () {
@@ -50,96 +53,114 @@ page('farm', (function () {
     blob: ['.....', '.###.', '#.#.#', '#####', '#####'],
   };
   const MINI_SLEEP = ['.....', '.....', '.....', '.###.', '#####'];
-  const MINI_SOUL = ['.#.', '#.#', '###', '#.#'];
   const SOUL = ['..###..', '.#...#.', '#.#.#.#', '#.....#', '#..#..#', '#.....#', '#.#.#.#', '.#.#.#.'];
   const DUCKLING = ['.#.', '###'];
   const KINDS = Object.keys(CAST);
-  // One kind per project, from its name.
-  function kindOf(r) {
-    if (r.kind) return r.kind;
-    let h = 0;
-    for (const c of r.name) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-    return KINDS[h % KINDS.length];
-  }
-  const sleepRows = c => ['........', '........', '........', c.acc[0], c.acc[1], '.######.', '#..##..#', '########'];
-  function seedOf(id) { let h = 7; for (const c of id) h = (h * 33 + c.charCodeAt(0)) % 9973; return h % 17; }
-  function rng(s) { return () => { s = (s * 16807) % 2147483647; return (s - 1) / 2147483646; }; }
 
-  // ---- the farm ----------------------------------------------------------------
-  const GROW_MS = 180000; // a stage of growth per 3 minutes of work, by the wall clock
-  const BEDS = [22, 44, 66, 88]; // a creature's top at its bed; soil at + 8
+  // ---- crops: one kind a project ----------------------------------------------
   const STAGES = [['..#..'], ['.#.#.', '..#..'], ['#.#.#', '.###.', '..#..'], ['.#.#.', '#.#.#', '.###.', '..#..', '..#..']];
   const RIPE = {
     pumpkin: ['..#..', '.###.', '##.##', '#####', '.###.'],
     cabbage: ['.#.#.', '#.#.#', '#####', '#####', '.###.'],
     sunflower: ['.###.', '##.##', '.###.', '..#..', '.##..', '..##.', '..#..'],
+    corn: ['..#..', '.###.', '.###.', '#.#.#', '.###.', '..#..', '..#..'],
+    carrot: ['#.#.#', '.#.#.', '..#..', '.###.', '.###.'],
+    strawberry: ['.#.#.', '#####', '#.#.#', '.###.', '..#..'],
   };
   const CROPS = Object.keys(RIPE);
-  const cropOf = kind => CROPS[KINDS.indexOf(kind) % CROPS.length];
   const plant = (rows, x, soil) => f.sprite(rows, x, soil - rows.length + 1);
-  const FARMHOUSE = ['....#####...', '...#######..', '..#########.', '.###########', '############', '.#........#.',
-    '.#.##..##.#.', '.#.##..##.#.', '.#........#.', '.#..##....#.', '.#..##....#.', '############'];
-  // Questions older than an hour: a mailbox at the fence with its flag up.
-  const MAILBOX = ['.#####.', '#.....##', '#.###.##', '#.....#.', '.#####..', '...#....', '...#....', '...#....', '...#....'];
-  const ASK = [[0, 114], [8, 114], [16, 114], [24, 114]]; // the mailbox, when up, hides the fourth
-  const HOME = [24, 8]; // the farmhouse door
 
-  // pose: walk, stand, sleep, water.
-  function critter(kind, pose, x, y, t, sd) {
-    const c = CAST[kind];
-    x = Math.round(x); y = Math.round(y);
-    if (pose === 'walk') f.sprite(Math.floor(t / 160 + sd) % 2 ? c.b : c.a, x, y);
-    else if (pose === 'stand') f.sprite(Math.floor(t / 500 + sd) % 2 ? c.b : c.a, x, y);
-    else if (pose === 'sleep') f.sprite(sleepRows(c), x, y);
-    else { // a watering can, tipped now and then over the bed
-      const ph = (t + sd * 137) % 1600;
-      f.sprite(c.a, x, y);
-      if (ph <= 900) { f.sprite(['.##..', '####.', '#####'], x + 7, y + 3); return; }
-      f.sprite(['.##..', '#####', '####.', '....#'], x + 7, y + 3);
-      const off = Math.floor((ph - 900) / 700 * 4);
-      f.px(x + 12, y + 6 + off); f.px(x + 13, y + 4 + off);
+  // A project's creature, crop and corner, given once, in first-seen order:
+  // the least used of each list. Kept in the save, so a project keeps them
+  // for weeks.
+  function project(name) {
+    const ps = save.projects = save.projects || {};
+    if (!ps[name]) {
+      const least = (list, key) => {
+        let best = list[0], n = Infinity;
+        list.forEach(v => { const c = Object.values(ps).filter(p => p[key] === v).length; if (c < n) { best = v; n = c; } });
+        return best;
+      };
+      ps[name] = { kind: least(KINDS, 'kind'), crop: least(CROPS, 'crop'), seen: Date.now() };
     }
+    return ps[name];
+  }
+  const kindOf = r => r.kind || project(r.name).kind;
+  const sleepRows = c => ['........', '........', '........', c.acc[0], c.acc[1], '.######.', '#..##..#', '########'];
+  function seedOf(id) { let h = 7; for (const c of id) h = (h * 33 + c.charCodeAt(0)) % 9973; return h % 17; }
+
+  // ---- the place ---------------------------------------------------------------
+  // Bands: sky 0-9, home 10-22, the patch 24-108, the gate 110-127.
+  const HOUSE = ['....##....', '..######..', '##########', '.#......#.', '.#.####.#.', '.#.#..#.#.', '.#.####.#.', '.#......#.', '.#...##.#.', '##########'];
+  const CART = ['#######', '#.....#', '#######', '.#...#.'];
+  const MAILBOX = ['.#####.', '#.....##', '#.###.##', '#.....#.', '.#####..', '...#....', '...#....', '...#....', '...#....'];
+  const DOOR = [1, 12];       // where a creature goes in
+  const PORCH = [[10, 13], [17, 13]];
+  const LANE = 12;            // a creature on the lane covers x 12..19
+  const ASK = [[0, 112], [8, 112], [16, 112]]; // the mailbox stands where a fourth would
+  // Eight corners either side of the lane, staggered; the plant faces the lane.
+  const CORNERS = [];
+  for (let i = 0; i < 8; i++) CORNERS.push(i % 2 === 0 ? { x: 0, y: 24 + (i / 2) * 19, px: 9, side: 1 } : { x: 24, y: 33 + ((i - 1) / 2) * 19, px: 18, side: -1 });
+
+  // ---- drawing helpers -----------------------------------------------------------
+  // Context usage is size: a pixel smaller under a third, chunky over three
+  // quarters. Row 6 is the body in every sprite; column 4 is inside the face.
+  function sized(rows, pct) {
+    if (pct === undefined || pct < 0 || (pct >= 34 && pct <= 75)) return rows;
+    if (pct < 34) return rows.filter((r, i) => i !== 6).map(r => r.slice(0, 4) + r.slice(5));
+    return rows.flatMap((r, i) => (i === 6 ? [r, r] : [r])).map(r => r.slice(0, 4) + r[3] + r[4] + r.slice(4));
+  }
+  // pose: walk, stand, water, done, sleep. Feet stay on y + 7 whatever the size.
+  function creature(m, pose, t) {
+    const c = CAST[m.kind];
+    let rows = pose === 'sleep' ? sleepRows(c) : pose === 'water' ? c.a : (Math.floor(t / (pose === 'walk' ? 160 : 500) + m.sd) % 2 ? c.b : c.a);
+    rows = sized(rows, m.r.context);
+    const w = rows[0].length, x = Math.round(m.x) - (w > 8 ? 1 : 0), y = Math.round(m.y) + 8 - rows.length + (pose === 'done' ? hop(t, m.sd) : 0);
+    f.sprite(rows, x, y);
+    if (pose === 'water') { // the can, tipped now and then over its plant
+      const ph = (t + m.sd * 137) % 1600, tip = ph > 900;
+      const can = tip ? ['.##..', '#####', '####.', '....#'] : ['.##..', '####.', '#####'];
+      f.sprite(m.side > 0 ? can : can.map(r => r.split('').reverse().join('')), m.side > 0 ? x + w - 1 : x - 4, y + 3);
+      if (tip) { const off = Math.floor((ph - 900) / 700 * 3), dx = m.side > 0 ? x + w + 3 : x - 4; f.px(dx, y + 6 + off); }
+    }
+    if (pose === 'sleep') zee(x + 6, y + 2, t, m.sd);
+    const n = Math.min(m.r.helpers || 0, 3); // in-turn subagents: ducklings over its head
+    for (let i = 0; i < n; i++) f.sprite(DUCKLING, x + i * 3 - 1 + (n === 1 ? 2 : 0), y - 3 + (Math.floor(t / 250 + i) % 2 ? -1 : 0));
+    return y;
+  }
+  function child(c, t) {
+    const rows = MINI[c.kind] || MINI.blob, x = Math.round(c.x), y = Math.round(c.y), s = c.r.state;
+    if (c.moving) f.sprite(rows, x, y + (Math.floor(t / 160 + c.sd) % 2));
+    else if (s === 'waiting') { f.sprite(rows, x, y); f.tiny('?', x + 1, y - 6); }
+    else if (s === 'working') { // bobbing, flicking a drop up at the plant now and then
+      f.sprite(rows, x, y + (Math.floor(t / 400 + c.sd) % 2));
+      const p = (t + c.sd * 97) % 1200;
+      if (p < 400) f.px(x + 2, y - 2 - Math.floor(p / 200));
+    } else if (s === 'done') f.sprite(rows, x, y + hop(t, c.sd));
+    else f.sprite(MINI_SLEEP, x, y);
   }
   // Draws only a share (0..1) of a sprite's pixels, the same ones every frame,
   // so it dissolves rather than flickers.
   function fade(rows, x, y, share) {
     rows.forEach((r, yy) => { for (let xx = 0; xx < r.length; xx++) if (r[xx] === '#' && ((xx * 7 + yy * 13) % 10) / 10 < share) f.px(x + xx, y + yy); });
   }
-  // Archived: it keels over, its ghost rises and thins out, the body fades.
-  // 3.4 s in all; false once it is over.
-  function departing(m, t) {
-    const age = t - m.dying, x = Math.round(m.x), y = Math.round(m.y);
-    if (age > 3400) return false;
-    fade(sleepRows(CAST[m.kind]), x, y, age < 600 ? 1 : Math.max(0, 1 - (age - 600) / 1200));
-    if (age >= 600) {
-      const k = (age - 600) / 2800;
-      fade(SOUL, x + Math.round(Math.sin(age / 300)), y - Math.round(k * Math.min(26, y + 2)), k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4);
-    }
-    return true;
-  }
   const hop = (t, sd) => { const p = (t + sd * 911) % 2600; return p < 150 ? -1 : p < 300 ? -2 : p < 450 ? -1 : 0; };
   function zee(x, y, t, sd) { const p = ((t / 1800) + sd * 0.37) % 1; f.tiny('Z', x + Math.round(p * 2), y - Math.round(p * 5)); }
-  // Walks m toward (tx, ty) at 16 px/s; true while it is still on its way.
-  function walk(m, tx, ty, dt) {
+  // Walks m toward (tx, ty) at 16 px/s, along the lane between bands: across
+  // to it, along it, then across. True while it is still on its way.
+  function walk(m, dt, lane) {
+    let tx = m.tx, ty = m.ty;
+    if (Math.abs(m.x - tx) > 0.5 && Math.abs(m.y - ty) > 0.5) {
+      if (Math.abs(m.x - lane) > 0.5) { tx = lane; ty = m.y; } else tx = lane;
+    }
     const dx = tx - m.x, dy = ty - m.y, dist = Math.hypot(dx, dy);
     if (dist <= 0.5) return false;
     const k = Math.min(1, dt * 0.016 / dist);
     m.x += dx * k; m.y += dy * k;
     return true;
   }
-  // Picks a new spot in one of the boxes [x0, y0, x1, y1] now and then.
-  function wander(m, dt, boxes) {
-    const inside = boxes.some(b => m.tx >= b[0] && m.tx <= b[2] && m.ty >= b[1] && m.ty <= b[3]);
-    if (inside && Math.hypot(m.tx - m.x, m.ty - m.y) > 0.5) return;
-    m.pause -= dt;
-    if (inside && m.pause > 0) return;
-    const b = boxes[Math.floor(m.rand() * boxes.length)];
-    m.tx = b[0] + Math.floor(m.rand() * (b[2] - b[0] + 1));
-    m.ty = b[1] + Math.floor(m.rand() * (b[3] - b[1] + 1));
-    m.pause = 1500 + m.rand() * 3000;
-  }
 
-  // ---- families ----------------------------------------------------------------
+  // ---- families ------------------------------------------------------------------
   // Splits the rows into grown-ups and children. A child's family is its
   // oldest live ancestor; a parent off the rows (quiet for an hour) comes back
   // while its children are there. A child whose parent is parked or archived
@@ -154,12 +175,12 @@ page('farm', (function () {
     kids.forEach(k => {
       if (adults.some(x => x.id === k.family)) return;
       const p = alive(k.family);
-      adults.push({ id: p.id, name: p.name, state: p.state, parent: '', helpers: p.helpers || 0 });
+      adults.push({ id: p.id, name: p.name, state: p.state, parent: '', helpers: p.helpers || 0, context: p.context });
     });
     return { adults, kids };
   }
 
-  // ---- weather -----------------------------------------------------------------
+  // ---- weather -------------------------------------------------------------------
   // d.weather (Open-Meteo); without it, fair weather and night by the clock.
   const MOON = ['.###.', '##...', '#....', '##...', '.###.'];
   const SUN = ['.###.', '#####', '#####', '#####', '.###.'];
@@ -173,27 +194,24 @@ page('farm', (function () {
   function sky(w, t, dt) {
     const wet = w.sky === 'rain' || w.sky === 'storm', clouded = w.sky !== 'clear';
     if (w.night && !clouded) {
-      f.sprite(MOON, 2, 1);
-      [[10, 2], [15, 6], [5, 10], [13, 12]].forEach(p => f.px(p[0], p[1]));
+      f.sprite(MOON, 13, 2);
+      [[20, 2], [24, 6], [3, 4], [8, 1]].forEach(p => f.px(p[0], p[1]));
     } else if (!w.night && !clouded) {
-      f.sprite(SUN, 2, 2);
+      f.sprite(SUN, 13, 2);
       const r = Math.floor(t / 1000) % 2; // the rays turn, slowly
-      (r ? [[4, 0], [4, 8], [0, 4], [8, 4]] : [[1, 1], [7, 1], [1, 7], [7, 7]]).forEach(p => f.px(p[0], p[1]));
+      (r ? [[15, 0], [15, 8], [11, 4], [19, 4]] : [[12, 1], [18, 1], [12, 7], [18, 7]]).forEach(p => f.px(p[0], p[1]));
     }
     const drift = 300 + 900 / (1 + w.wind / 10); // clouds drift with the wind
     if (clouded && w.sky !== 'fog') {
-      f.sprite(CLOUD, Math.round((t / drift) % 44) - 12, 1);
-      f.sprite(CLOUD, Math.round((t / (drift * 1.5) + 20) % 44) - 12, 8);
-      if (w.sky === 'storm') f.sprite(CLOUD, Math.round((t / (drift * 1.2) + 32) % 44) - 12, 4);
+      f.sprite(CLOUD, Math.round((t / drift) % 44) - 12, 0);
+      f.sprite(CLOUD, Math.round((t / (drift * 1.5) + 20) % 44) - 12, 4);
+      if (w.sky === 'storm') f.sprite(CLOUD, Math.round((t / (drift * 1.2) + 32) % 44) - 12, 2);
     }
     if (w.sky === 'fog') // patches of haze drifting across, not lines
-      [40, 58, 76, 94].forEach((y, i) => {
-        const x = Math.round(((t / (900 + i * 300)) + i * 11) % 44) - 10;
-        f.sprite(['##.##.##', '.##.##..'], x, y);
-      });
+      [40, 58, 76, 94].forEach((y, i) => f.sprite(['##.##.##', '.##.##..'], Math.round(((t / (900 + i * 300)) + i * 11) % 44) - 10, y));
     if (wet || w.sky === 'snow') {
       const snow = w.sky === 'snow', want = snow ? 10 : w.sky === 'storm' ? 12 : 7, slant = Math.min(w.wind / 40, 1);
-      while (flakes.length < want) flakes.push({ x: Math.random() * (W + 10) - 10 * slant, y: 12 - Math.random() * 40, s: Math.random() });
+      while (flakes.length < want) flakes.push({ x: Math.random() * (W + 10) - 10 * slant, y: 8 - Math.random() * 40, s: Math.random() });
       for (let i = flakes.length - 1; i >= 0; i--) {
         const p = flakes[i];
         p.y += dt * (snow ? 0.012 : 0.07);
@@ -205,46 +223,198 @@ page('farm', (function () {
     } else flakes.length = 0;
   }
 
+  // ---- the simulation ------------------------------------------------------------
+  // tick() runs every frame whichever page shows, so the farm keeps going
+  // behind perf and music: corners are handed out, plants grow (timed by the
+  // wall clock, so through a suspend too), crops are harvested, creatures
+  // walk. The page only draws what tick left.
+  const GROW_MS = 180000; // a stage of growth per 3 minutes of work
+  const mobs = new Map(), kids = new Map();
+  let lastTick = null, insideIdle = 0, insideBusy = 0;
+  const workOf = m => (m.workMs || 0) + (m.since ? Date.now() - m.since : 0);
+
+  // A project's corner: kept while the project lives; a second session of it
+  // takes the nearest free corner; with all eight taken, the project quiet
+  // longest gives its corner up.
+  function cornerFor(m, used) {
+    const ps = save.projects, p = project(m.r.name);
+    const owner = i => Object.keys(ps).find(n => ps[n].corner === i);
+    if (p.corner === undefined) {
+      let free = CORNERS.findIndex((c, i) => owner(i) === undefined);
+      if (free < 0) {
+        const live = new Set([...mobs.values()].map(x => x.r.name));
+        const quiet = Object.keys(ps).filter(n => ps[n].corner !== undefined && !live.has(n)).sort((x, y) => ps[x].seen - ps[y].seen)[0];
+        if (quiet === undefined) return undefined;
+        free = ps[quiet].corner;
+        delete ps[quiet].corner;
+      }
+      p.corner = free;
+    }
+    if (!used.has(p.corner)) return p.corner;
+    const c0 = CORNERS[p.corner];
+    let best, bd = Infinity;
+    CORNERS.forEach((c, i) => {
+      if (used.has(i) || owner(i) !== undefined) return;
+      const dist = Math.abs(c.y - c0.y) + Math.abs(c.x - c0.x);
+      if (dist < bd) { bd = dist; best = i; }
+    });
+    return best;
+  }
+
+  tick(function farmTick(d, t) {
+    const dt = lastTick === null ? 50 : Math.min(200, Math.max(0, t - lastTick)); lastTick = t;
+    const a = d.agents;
+    if (!a) return;
+    const now = Date.now();
+    save.harvest = save.harvest || 0;
+    save.crops = save.crops || {};
+    const { adults, kids: kidRows } = families(a);
+    const sessions = new Map((a.sessions || []).map(s => [s.id, s]));
+
+    // who is here
+    const seen = new Set();
+    adults.forEach(r => {
+      seen.add(r.id);
+      let m = mobs.get(r.id);
+      if (!m) { // out of the door, back to the growth the save says it had
+        const c = save.crops[r.id] || {};
+        m = { x: DOOR[0], y: DOOR[1], tx: DOOR[0], ty: DOOR[1], sd: seedOf(r.id), workMs: c.workMs || c.work || 0, since: c.since || 0, ripe: !!c.ripe };
+        mobs.set(r.id, m);
+      }
+      m.r = r; m.kind = kindOf(r);
+      project(r.name).seen = now;
+    });
+    // off the rows: merged, it leaves through the gate with its crop and the
+    // flag goes up; otherwise (archived, parked, quiet) it goes home
+    mobs.forEach((m, id) => {
+      if (seen.has(id) || m.leaving) return;
+      const s = sessions.get(id);
+      if (s && s.state === 'archived' && s.merged) {
+        m.leaving = 'gate'; m.carry = m.ripe; save.flagUntil = now + 60 * 60000;
+      } else m.leaving = 'home';
+      if (s && s.state === 'archived') save.departed = (save.departed || 0) + 1;
+      m.corner = undefined;
+    });
+
+    // A family works one plant: busy while anyone in it works, ripe once
+    // nobody works and someone is done, harvested when all of it has been seen.
+    const kidsOf = new Map();
+    kidRows.forEach(k => { if (!kidsOf.has(k.family)) kidsOf.set(k.family, []); kidsOf.get(k.family).push(k); });
+    const used = new Set();
+    mobs.forEach((m, id) => {
+      if (m.leaving) return;
+      const ks = kidsOf.get(id) || [], st = m.r.state;
+      m.busy = st === 'working' || ks.some(k => k.state === 'working');
+      const ripe = !m.busy && (st === 'done' || ks.some(k => k.state === 'done'));
+      const asking = st === 'waiting' || ks.some(k => k.state === 'waiting'); // the plant waits for the answer
+      if (m.busy && !m.since) m.since = now;
+      if (!m.busy && m.since) { m.workMs = workOf(m); m.since = 0; }
+      if (!m.busy && !ripe && !asking && (m.ripe || m.workMs)) {
+        if (m.ripe) { save.harvest++; save.harvested = (save.harvested || 0) + 1; }
+        m.workMs = 0; m.ripe = false;
+      }
+      m.ripe = ripe;
+      m.growing = m.busy || m.ripe || (asking && m.workMs > 0);
+    });
+    // corners: those with a plant (or a question beside one) first
+    [...mobs.values()].filter(m => !m.leaving && (m.growing || m.workMs)).forEach(m => { m.corner = cornerFor(m, used); if (m.corner !== undefined) used.add(m.corner); });
+    mobs.forEach((m, id) => {
+      if (m.leaving || !(m.growing || m.workMs)) { m.corner = m.leaving ? undefined : m.corner; delete save.crops[id]; return; }
+      save.crops[id] = { workMs: Math.round(m.workMs || 0), since: m.since || 0, ripe: !!m.ripe };
+    });
+    Object.keys(save.crops).forEach(id => { if (!mobs.has(id)) delete save.crops[id]; });
+
+    // where everyone goes
+    let ask = 0, porch = 0;
+    insideIdle = 0; insideBusy = 0;
+    const order = [...mobs.values()].sort((p, q) => (p.r.state === 'waiting' ? 0 : 1) - (q.r.state === 'waiting' ? 0 : 1));
+    order.forEach(m => {
+      const s = m.r.state, c = CORNERS[m.corner];
+      m.indoors = false; m.watching = false;
+      if (m.leaving === 'gate') { m.tx = LANE; m.ty = 136; }
+      else if (m.leaving === 'home') { m.tx = DOOR[0]; m.ty = DOOR[1]; }
+      else if (s === 'waiting') { const i = ask++; m.tx = i < 3 ? ASK[i][0] : (i - 3) * 8 + 4; m.ty = i < 3 ? ASK[i][1] : 103; }
+      else if (c && m.growing) { m.tx = c.x; m.ty = c.y; m.watching = s === 'idle'; }
+      else if (s === 'idle') {
+        if (porch < 2) { [m.tx, m.ty] = PORCH[porch++]; } else { m.tx = DOOR[0]; m.ty = DOOR[1]; m.indoors = true; }
+      } else { m.tx = DOOR[0]; m.ty = DOOR[1]; m.indoors = true; } // no corner free: it works indoors
+    });
+    mobs.forEach((m, id) => {
+      m.moving = walk(m, dt, LANE);
+      if (m.leaving && !m.moving) mobs.delete(id);
+      else if (m.indoors && !m.moving) { if (m.r.state === 'idle') insideIdle++; else insideBusy++; }
+    });
+
+    // the children: below their parent's corner while the family works (two
+    // in front, the rest crowding behind), at the gate when they ask, curled up
+    // by the parent otherwise; archived, home through the door, or out
+    // through the gate when merged
+    const kseen = new Set(), at = new Map();
+    let kidAsk = Math.min(ask, 3) * 8;
+    kidRows.forEach(k => {
+      kseen.add(k.id);
+      const p = mobs.get(k.family);
+      let c = kids.get(k.id);
+      if (!c) { c = { x: p ? p.x + 2 : DOOR[0], y: p ? p.y + 3 : DOOR[1] + 2, sd: seedOf(k.id) }; kids.set(k.id, c); }
+      c.r = k; c.kind = k.kind;
+      const pc = p && CORNERS[p.corner];
+      if (k.state === 'waiting') { c.tx = Math.min(kidAsk, 26); c.ty = 115; kidAsk += 6; }
+      else if (pc && p.growing) {
+        const j = at.get(k.family) || 0; at.set(k.family, j + 1);
+        c.tx = pc.side > 0 ? Math.min(j, 2) * 5 : 27 - Math.min(j, 2) * 5; c.ty = pc.y + 10 - (j > 1 ? 1 : 0);
+      } else if (p) { c.tx = Math.min(Math.round(p.tx) + 9, 27); c.ty = p.ty + 3; }
+      else { c.tx = DOOR[0]; c.ty = DOOR[1] + 2; }
+    });
+    kids.forEach((c, id) => {
+      if (!kseen.has(id) && !c.leaving) {
+        const s = sessions.get(id);
+        c.leaving = s && s.state === 'archived' && s.merged ? 'gate' : 'home';
+        if (c.leaving === 'gate') { c.tx = LANE + 1; c.ty = 136; } else { c.tx = DOOR[0]; c.ty = DOOR[1] + 2; }
+      }
+      c.moving = walk(c, dt, LANE + 1);
+      if (c.leaving && !c.moving) kids.delete(id);
+    });
+  });
+
   // ---- events ------------------------------------------------------------------
   // A short scene now and then, Johnny Castaway style. One at a time, checked
   // every 5 s. when(c) says it may start; every (ms, wall clock, kept in the
   // save) how long at least between two; mean, for the ambient ones, how long
   // on average after that, so they come unannounced. start(c) and end(c)
   // change the game; draw(c, k, t) draws it, k from 0 to 1 over len ms.
-  // c: { a, w (weather), mobs, now (Date.now()), today, minutes (of the day), ev (the running one) }.
+  // c: { a, w (weather), now (Date.now()), today, minutes (of the day), ev (the running one) }.
   const MIN = 60000;
   const CROW = [['#...#', '.#.#.', '..#..'], ['.....', '.#.#.', '#.#.#']];
   const PERCH = [['..##', '.###', '###.', '.#..'], ['....', '..##', '####', '.#..']];
   const BUTTERFLY = [['#.#', '.#.', '#.#'], ['.#.', '.#.', '.#.']];
-  const CART = ['.......', '#######', '#.....#', '#######', '.#...#.'];
   const SCARECROW = ['..###..', '..#.#..', '..###..', '#######', '#..#..#', '..###..', '..###..', '...#...', '...#...', '...#...', '...#...'];
   const BALLOON = ['..###..', '.#####.', '#######', '##.#.##', '#######', '.#####.', '..###..', '..#.#..', '..#.#..', '..###..'];
   const SNOWMAN = ['.###.', '#.#.#', '#####', '.###.', '#####', '#####', '.###.'];
   const ROOSTER = [['.##..', '###..', '.####', '.###.', '..#..'], ['.##..', '###.#', '.####', '.###.', '..#..']];
+  const SCARECROW_AT = [0, 97], SNOWMAN_AT = [25, 24]; // the bottom left and top right gaps in the stagger
   const lerp = (a, b, k) => a + (b - a) * Math.max(0, Math.min(1, k));
   const clockMin = s => (s && s.length >= 5 ? Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5)) : -1);
-  const growingBed = c => [...c.mobs.values()].find(m => m.bed !== undefined && !m.ripe);
-  let hidePile = false;
+  const growingPlant = () => [...mobs.values()].find(m => m.corner !== undefined && m.busy);
+  let cartAway = false;
 
   const EVENTS = [
-    { // a full pile: the cart comes, loads it and goes; the farm sells a load
+    { // a full load: the cart drives off with it and comes back empty
       name: 'cart', len: 10000, every: 0,
       when: () => (save.harvest || 0) >= 9,
       end: () => { save.harvest = Math.max(0, save.harvest - 9); save.sold = (save.sold || 0) + 1; },
       draw: (c, k) => {
-        const x = k < 0.3 ? lerp(-8, 12, k / 0.3) : k < 0.7 ? 12 : lerp(12, 33, (k - 0.7) / 0.3);
-        f.sprite(CART, Math.round(x), 101);
-        if (k >= 0.5) f.sprite(['.#.#.#.'], Math.round(x), 100);
-        hidePile = k >= 0.5;
+        cartAway = true;
+        if (k < 0.4) { const x = Math.round(lerp(25, 33, k / 0.4)); f.sprite(CART, x, 18); for (let r = 0; r < 3; r++) f.sprite(['.#.#.#.'], x, 17 - r); }
+        else if (k > 0.6) f.sprite(CART, Math.round(lerp(33, 25, (k - 0.6) / 0.4)), 18);
       },
     },
-    { // twenty harvests in all: a scarecrow goes up, and stays
+    { // twenty harvests in all: a scarecrow goes up beside the lane, and stays
       name: 'scarecrow', len: 5000, every: 0,
       when: () => (save.harvested || 0) >= 20 && !(save.unlocked || {}).scarecrow,
       end: () => { save.unlocked = Object.assign(save.unlocked || {}, { scarecrow: true }); },
-      draw: (c, k) => { const h = Math.round(SCARECROW.length * k); f.sprite(SCARECROW.slice(0, h), 25, 112 - h); },
+      draw: (c, k) => { const h = Math.round(SCARECROW.length * k); f.sprite(SCARECROW.slice(0, h), SCARECROW_AT[0], SCARECROW_AT[1] + SCARECROW.length - h); },
     },
-    { // every 500 turns Agentique has run: a balloon goes up
+    { // every 500 turns Agentique has run: a balloon goes up the lane
       name: 'balloon', len: 20000, every: 0,
       when: c => {
         const n = Math.floor(c.a.totals.turns / 500);
@@ -252,61 +422,61 @@ page('farm', (function () {
         return n > save.turnMark;
       },
       start: c => { save.turnMark = Math.floor(c.a.totals.turns / 500); },
-      draw: (c, k, t) => f.sprite(BALLOON, Math.round(lerp(4, 16, k) + Math.sin(t / 900) * 2), Math.round(lerp(110, -12, k))),
+      draw: (c, k, t) => f.sprite(BALLOON, Math.round(LANE + 1 + Math.sin(t / 900) * 2), Math.round(lerp(110, -12, k))),
     },
-    { // the rain has stopped and the sun is out: a rainbow over the beds
+    { // the rain has stopped and the sun is out: a rainbow across the sky
       name: 'rainbow', len: 60000, every: 30 * MIN,
       when: c => !c.w.night && c.w.sky !== 'rain' && c.now - (save.events.rainEnded || 0) < 10 * MIN,
       draw: (c, k) => {
         const share = k < 0.2 ? k / 0.2 : k > 0.8 ? (1 - k) / 0.2 : 1;
-        [9, 7, 5].forEach(r => { for (let a = 0; a <= 32; a++) { const th = Math.PI * a / 32; if (((a * 7 + r) % 10) / 10 < share) f.px(10 + Math.cos(th) * r, 22 - Math.sin(th) * r); } });
+        [9, 7, 5].forEach(r => { for (let a = 0; a <= 32; a++) { const th = Math.PI * a / 32; if (((a * 7 + r) % 10) / 10 < share) f.px(22 + Math.cos(th) * r, 10 - Math.sin(th) * r); } });
       },
     },
     { // after snow, while it is freezing: someone builds a snowman
       name: 'snowman', len: 6000, every: 12 * 60 * MIN,
       when: c => c.w.temp <= 1 && c.now - (save.events.snowed || 0) < 6 * 60 * MIN,
       end: c => { save.snowman = c.now; },
-      draw: (c, k) => { const h = Math.round(SNOWMAN.length * k); f.sprite(SNOWMAN.slice(SNOWMAN.length - h), 13, 20 - h); },
+      draw: (c, k) => { const h = Math.round(SNOWMAN.length * k); f.sprite(SNOWMAN.slice(SNOWMAN.length - h), SNOWMAN_AT[0], SNOWMAN_AT[1] + SNOWMAN.length - h); },
     },
     { // the first light of the day: the rooster on the roof
       name: 'rooster', len: 8000, every: 0,
       when: c => { const s = clockMin(c.w.sunrise) >= 0 ? clockMin(c.w.sunrise) : 7 * 60; return !c.w.night && c.minutes >= s && c.minutes < s + 120 && save.events.rooster !== c.today; },
       start: c => { save.events.rooster = c.today; },
-      draw: (c, k, t) => f.sprite(ROOSTER[Math.floor(t / 400) % 2], 24, 1),
+      draw: (c, k, t) => f.sprite(ROOSTER[Math.floor(t / 400) % 2], 3, 6),
     },
-    { // a crow on a growing bed, pecking, until it is shooed off
+    { // a crow on a growing plant, pecking, until it is shooed off
       name: 'crow', len: 9000, every: 20 * MIN, mean: 40 * MIN,
-      when: c => !c.w.night && !!growingBed(c),
-      start: c => { c.ev.bed = growingBed(c).bed; },
+      when: c => !c.w.night && !!growingPlant(),
+      start: c => { const m = growingPlant(); const k = CORNERS[m.corner]; c.ev.at = [k.px, k.y + 1]; },
       draw: (c, k, t) => {
-        const ty = BEDS[c.ev.bed] + 2, flap = CROW[Math.floor(t / 150) % 2];
-        if (k < 0.25) f.sprite(flap, Math.round(lerp(33, 22, k / 0.25)), Math.round(lerp(-4, ty, k / 0.25)));
-        else if (k < 0.8) f.sprite(PERCH[Math.floor(t / 400) % 2], 22, ty);
-        else f.sprite(flap, Math.round(lerp(22, -6, (k - 0.8) / 0.2)), Math.round(lerp(ty, -4, (k - 0.8) / 0.2)));
+        const [px, py] = c.ev.at, flap = CROW[Math.floor(t / 150) % 2];
+        if (k < 0.25) f.sprite(flap, Math.round(lerp(33, px, k / 0.25)), Math.round(lerp(-4, py, k / 0.25)));
+        else if (k < 0.8) f.sprite(PERCH[Math.floor(t / 400) % 2], px, py);
+        else f.sprite(flap, Math.round(lerp(px, -6, (k - 0.8) / 0.2)), Math.round(lerp(py, -4, (k - 0.8) / 0.2)));
       },
     },
-    { // a warm, dry day: a butterfly over the meadow
+    { // a warm, dry day: a butterfly over the patch
       name: 'butterfly', len: 8000, every: 10 * MIN, mean: 30 * MIN,
       when: c => !c.w.night && c.w.temp >= 12 && c.w.sky !== 'rain' && c.w.sky !== 'snow',
-      draw: (c, k, t) => f.sprite(BUTTERFLY[Math.floor(t / 200) % 2], Math.round(lerp(-3, 33, k)), Math.round(40 + Math.sin(k * 12) * 6)),
+      draw: (c, k, t) => f.sprite(BUTTERFLY[Math.floor(t / 200) % 2], Math.round(lerp(-3, 33, k)), Math.round(50 + Math.sin(k * 12) * 6)),
     },
     { // a clear night: a shooting star
       name: 'star', len: 1500, every: 10 * MIN, mean: 30 * MIN,
       when: c => c.w.night && c.w.sky === 'clear',
-      draw: (c, k) => { for (let i = 0; i < 4; i++) { const kk = k - i * 0.06; if (kk > 0 && kk < 1) f.px(lerp(30, 4, kk), lerp(1, 14, kk)); } },
+      draw: (c, k) => { for (let i = 0; i < 4; i++) { const kk = k - i * 0.06; if (kk > 0 && kk < 1) f.px(lerp(30, 4, kk), lerp(0, 8, kk)); } },
     },
     { // a windy day: leaves blowing over the farm
       name: 'leaves', len: 6000, every: 15 * MIN, mean: 20 * MIN,
       when: c => c.w.wind >= 20 && c.w.sky !== 'snow',
-      draw: (c, k, t) => [[20, 0], [55, 0.2], [80, 0.35], [35, 0.5]].forEach(([y, d]) => {
+      draw: (c, k, t) => [[30, 0], [55, 0.2], [80, 0.35], [45, 0.5]].forEach(([y, d]) => {
         const kk = (k - d) / 0.5;
         if (kk > 0 && kk < 1) { const x = lerp(-2, 33, kk), yy = y + Math.sin(t / 200 + y) * 2; f.px(x, yy); f.px(x + 1, yy + (Math.floor(t / 300) % 2)); }
       }),
     },
-    { // at night the departed come back to look in, now and then
+    { // at night someone who went home looks in now and then
       name: 'visitor', len: 10000, every: 30 * MIN, mean: 90 * MIN,
       when: c => c.w.night && (save.departed || 0) > 0,
-      draw: (c, k, t) => fade(SOUL, Math.round(lerp(33, -8, k)), Math.round(24 + Math.sin(t / 500) * 2), 0.5),
+      draw: (c, k, t) => fade(SOUL, Math.round(lerp(33, -8, k)), Math.round(28 + Math.sin(t / 500) * 2), 0.5),
     },
   ];
 
@@ -318,7 +488,6 @@ page('farm', (function () {
     if (c.w.sky === 'rain' || c.w.sky === 'storm') ev.raining = true;
     else if (ev.raining) { ev.raining = false; ev.rainEnded = c.now; }
     if (c.w.sky === 'snow') ev.snowed = c.now;
-    hidePile = false;
     if (!cur && t >= nextCheck) {
       nextCheck = t + 5000;
       const pick = EVENTS.find(e => e.when(c) && c.now - (ev.last[e.name] || 0) >= e.every && (!e.mean || Math.random() < 5000 / e.mean));
@@ -327,221 +496,68 @@ page('farm', (function () {
     if (!cur) return;
     c.ev = cur;
     const k = (t - cur.at) / cur.e.len;
-    if (k >= 1) { if (cur.e.end) cur.e.end(c); cur = null; return; }
+    if (k >= 1) { if (cur.e.end) cur.e.end(c); cur = null; cartAway = false; return; }
     cur.e.draw(c, k, t);
   }
-
-  // ---- the simulation ------------------------------------------------------------
-  // tick() runs every frame whichever page shows, so the farm keeps going
-  // behind perf and music: sessions get their beds, plants grow (timed by the
-  // wall clock, so through a suspend too), crops are harvested, creatures
-  // walk. The page only draws what tick left.
-  const mobs = new Map(), kidMobs = new Map();
-  let lastTick = null, insideBusy = 0, insideIdle = 0;
-  const workOf = m => (m.workMs || 0) + (m.since ? Date.now() - m.since : 0);
-
-  // A family works one bed: busy while anyone in it works, ripe once nobody
-  // works and someone is done, harvested when all of it has been seen. The
-  // bed and its growth are kept in the save.
-  function beds(a, kids) {
-    save.harvest = save.harvest || 0;
-    save.crops = save.crops || {};
-    const taken = new Set(), kidsOf = new Map();
-    kids.forEach(k => { if (!kidsOf.has(k.family)) kidsOf.set(k.family, []); kidsOf.get(k.family).push(k); });
-    mobs.forEach((m, id) => {
-      const ks = kidsOf.get(id) || [], st = m.r.state;
-      const busy = !m.dying && !m.home && (st === 'working' || ks.some(k => k.state === 'working'));
-      const ripe = !m.dying && !m.home && !busy && (st === 'done' || ks.some(k => k.state === 'done'));
-      if (busy && !m.since) m.since = Date.now();
-      if (!busy && m.since) { m.workMs = workOf(m); m.since = 0; }
-      m.busy = busy;
-      if (m.bed !== undefined && !busy && !ripe) {
-        if (m.ripe) { save.harvest++; save.harvested = (save.harvested || 0) + 1; }
-        m.bed = undefined; m.workMs = 0; m.ripe = false;
-      }
-      if (m.bed !== undefined) { m.ripe = ripe; taken.add(m.bed); }
-    });
-    mobs.forEach(m => { if (m.busy && m.bed === undefined) for (let s = 0; s < BEDS.length; s++) if (!taken.has(s)) { m.bed = s; taken.add(s); break; } });
-    const live = new Set((a.sessions || []).map(s => s.id));
-    Object.keys(save.crops).forEach(id => { if (!live.has(id) && !mobs.has(id)) delete save.crops[id]; });
-    mobs.forEach((m, id) => {
-      if (m.bed === undefined) delete save.crops[id];
-      else save.crops[id] = { bed: m.bed, workMs: Math.round(m.workMs || 0), since: m.since || 0, ripe: !!m.ripe };
-    });
-  }
-
-  // Where every grown-up goes: askers to the fence (a second rank behind the
-  // first when there are more than four), workers to their bed, a family with
-  // no free bed works indoors, two sleepers outside the house and the rest
-  // inside, a parent whose children work stands at its bed.
-  function places(by, dt) {
-    by.waiting.forEach((r, i) => { const m = mobs.get(r.id); m.tx = i < 4 ? ASK[i][0] : (i - 4) * 8 + 4; m.ty = i < 4 ? ASK[i][1] : 104; });
-    by.idle.filter(r => mobs.get(r.id).bed === undefined).forEach((r, i) => {
-      const m = mobs.get(r.id);
-      if (i < 2) { m.tx = i * 8; m.ty = 12; } else { m.tx = HOME[0]; m.ty = HOME[1]; m.indoors = true; }
-    });
-    insideBusy = 0; insideIdle = 0;
-    mobs.forEach(m => {
-      const s = m.r.state;
-      m.pose = undefined;
-      if (m.dying || m.home) return;
-      if (s !== 'idle') m.indoors = false;
-      if (s === 'waiting') return;
-      if (m.bed === undefined) {
-        if (s === 'working' || s === 'done') { m.tx = HOME[0]; m.ty = HOME[1]; m.indoors = true; }
-        return;
-      }
-      m.tx = 1; m.ty = BEDS[m.bed];
-      if (s === 'idle') m.pose = 'stand';
-    });
-  }
-
-  // The children: on the path under their family's plant while it is worked,
-  // at the fence when they ask, curled up by their parent when idle, and a
-  // small ghost when archived.
-  function kidPlaces(a, kids, waitingAdults, t) {
-    const seen = new Set(), gone = new Map((a.sessions || []).map(s => [s.id, s.state]));
-    let waitAt = Math.min(waitingAdults, 4) * 8;
-    const slotOf = new Map(), idleOf = new Map();
-    kids.forEach(k => {
-      seen.add(k.id);
-      const p = mobs.get(k.family);
-      let c = kidMobs.get(k.id);
-      if (!c) { c = { x: p ? p.x + 2 : HOME[0], y: p ? p.y + 3 : HOME[1] + 2, sd: seedOf(k.id) }; kidMobs.set(k.id, c); }
-      c.k = k; c.kind = k.kind;
-      if (k.state === 'waiting') { c.tx = Math.min(waitAt, 27); c.ty = 116; waitAt += 6; }
-      else if (p && p.bed !== undefined && k.state !== 'idle') {
-        const j = slotOf.get(k.family) || 0; slotOf.set(k.family, j + 1);
-        c.tx = 12 + (j % 4) * 5; c.ty = BEDS[p.bed] + 11 + Math.min(Math.floor(j / 4), 1) * 6; // four to a line, two lines
-      } else if (p) {
-        const j = idleOf.get(k.family) || 0; idleOf.set(k.family, j + 1);
-        c.tx = Math.min(Math.round(p.tx) + 9 + j * 5, 27); c.ty = p.ty + 3;
-      } else { c.tx = 12; c.ty = 16; }
-    });
-    kidMobs.forEach((c, id) => {
-      if (seen.has(id) || c.dying) return;
-      if (gone.get(id) === 'archived') c.dying = t; else kidMobs.delete(id);
-    });
-  }
-
-  tick(function farmTick(d, t) {
-    const dt = lastTick === null ? 50 : Math.min(200, Math.max(0, t - lastTick)); lastTick = t;
-    const a = d.agents;
-    if (!a) return;
-    const { adults, kids } = families(a);
-    const by = { working: [], waiting: [], done: [], idle: [] }, seen = new Set();
-    adults.forEach(r => {
-      by[r.state].push(r); seen.add(r.id);
-      let m = mobs.get(r.id);
-      if (!m) { // from the farmhouse, back to the bed the save says it had
-        const sd = seedOf(r.id), c = (save.crops || {})[r.id];
-        m = { x: HOME[0], y: HOME[1], tx: HOME[0], ty: HOME[1], pause: 0, rand: rng(sd + 3), sd, kind: kindOf(r) };
-        if (c) { m.bed = c.bed; m.workMs = c.workMs || c.work || 0; m.since = c.since || 0; m.ripe = c.ripe; }
-        mobs.set(r.id, m);
-      }
-      m.r = r;
-    });
-    // off the rows: archived, it dies; otherwise (parked, or quiet) it goes home
-    const gone = new Map((a.sessions || []).map(s => [s.id, s.state]));
-    mobs.forEach((m, id) => {
-      if (seen.has(id) || m.dying || m.home) return;
-      if (gone.get(id) === 'archived') { m.dying = t; save.departed = (save.departed || 0) + 1; }
-      else { m.home = true; m.tx = HOME[0]; m.ty = HOME[1]; }
-    });
-    beds(a, kids);
-    places(by, dt);
-    mobs.forEach(m => {
-      m.moving = !m.dying && walk(m, m.tx, m.ty, dt);
-      if (m.home && !m.moving) mobs.delete(m.r.id);
-      if (m.dying && t - m.dying > 3400) mobs.delete(m.r.id);
-      if (m.indoors && !m.moving && !m.dying) { if (m.r.state === 'idle') insideIdle++; else insideBusy++; }
-    });
-    kidPlaces(a, kids, by.waiting.length, t);
-    kidMobs.forEach((c, id) => {
-      if (c.dying) { if (t - c.dying > 2600) kidMobs.delete(id); return; }
-      c.moving = walk(c, c.tx, c.ty, dt);
-    });
-  });
 
   // ---- the page ------------------------------------------------------------------
   let last = null;
 
   function scenery(a, w, t, dt) {
     sky(w, t, dt);
-    f.sprite(FARMHOUSE, 20, 8);
-    if (w.night || insideIdle) f.fill(22, 14, 2, 2); // the lamp is on: night, or someone asleep inside
-    if (insideBusy) for (let i = 0; i < 3; i++) { const p = ((t / 900) + i / 3) % 1; f.px(29 + Math.round(Math.sin(p * 6 + i)), 7 - Math.round(p * 7)); } // smoke: working indoors
-    if (w.sky === 'snow') for (let x = 21; x < 32; x++) f.px(x, 7 + Math.abs(x - 26) / 2 | 0);
+    // home: the house (snow on the roof, the flag after a merge, the window lit
+    // with someone asleep inside or smoke when someone works indoors), the
+    // porch, the cart with its load in rows of three
+    f.sprite(HOUSE, 0, 11);
+    if (w.sky === 'snow') f.sprite(['....##....', '..######..'], 0, 10);
+    if (w.night || insideIdle || (a && a.laterIdle)) f.fill(4, 16, 2, 1);
+    if (insideBusy) for (let i = 0; i < 3; i++) { const p = ((t / 900) + i / 3) % 1; f.px(7 + Math.round(Math.sin(p * 6 + i)), 11 - Math.round(p * 9)); }
+    if ((save.flagUntil || 0) > Date.now()) { f.fill(9, 3, 1, 8); f.sprite(Math.floor(t / 600) % 2 ? ['###', '##.', '#..'] : ['##.', '###', '#..'], 10, 3); }
+    for (let x = 10; x < 25; x++) f.px(x, 21);
+    if (!cartAway) {
+      f.sprite(CART, 25, 18);
+      for (let r = 0; r < Math.min(Math.floor((save.harvest || 0) / 3), 3); r++) f.sprite(['.#.#.#.'], 25, 17 - r);
+    }
+    // the lane, worn only at its ends: by the porch and at the gate
+    [[15, 24], [14, 27], [16, 30]].forEach(([x, y]) => f.fill(x, y, 2, 1));
+    [[13, 104], [16, 105], [14, 107], [17, 108], [15, 109]].forEach(([x, y]) => f.px(x, y));
+    // the corners that belong to a project: a mound each
+    Object.values(save.projects || {}).forEach(p => { if (p.corner !== undefined) { const c = CORNERS[p.corner]; f.sprite(['.###.'], c.px, c.y + 8); } });
     // what the farm has earned stays: the scarecrow, a snowman while it lasts
-    if ((save.unlocked || {}).scarecrow) f.sprite(SCARECROW, 25, 101);
-    if (save.snowman && Date.now() - save.snowman < 48 * 60 * MIN && w.temp <= 3) f.sprite(SNOWMAN, 13, 13);
-    // the harvest pile beside the house, a dot per crop brought in
-    const n = hidePile ? 0 : Math.min(save.harvest || 0, 9);
-    for (let k = 0; k < n; k++) f.fill(17 - (k % 3) * 2, 18 - Math.floor(k / 3) * 2, 1, 1);
-    if (a && (a.laterIdle || insideIdle)) zee(26, 3, t, 3);
-    // the fence, and the mailbox at the gate
-    for (let x = 0; x < W; x++) { f.px(x, 123); f.px(x, 126); }
-    for (let x = 1; x < W; x += 5) f.fill(x, 122, 1, 6);
-    if (a && a.laterWaiting) f.sprite(MAILBOX, 24, 113);
-    BEDS.forEach(y => { for (let x = 12; x < 31; x += 2) f.px(x, y + 9); });
+    if ((save.unlocked || {}).scarecrow) f.sprite(SCARECROW, SCARECROW_AT[0], SCARECROW_AT[1]);
+    if (save.snowman && Date.now() - save.snowman < 48 * 60 * MIN && w.temp <= 3) f.sprite(SNOWMAN, SNOWMAN_AT[0], SNOWMAN_AT[1]);
+    // the gate in the middle, a stub of fence either side, the mailbox on the right one
+    [[0, 9], [22, 31]].forEach(([x0, x1]) => { for (let x = x0; x <= x1; x++) { f.px(x, 122); f.px(x, 125); } f.fill(x0 + 1, 121, 1, 7); f.fill(x1 - 1, 121, 1, 7); });
+    f.fill(11, 118, 1, 10); f.fill(20, 118, 1, 10);
+    for (let x = 12; x < 20; x++) { f.px(x, 121); f.px(x, 125); }
+    f.fill(14, 122, 1, 3); f.fill(17, 122, 1, 3);
+    if (a && a.laterWaiting) f.sprite(MAILBOX, 24, 111);
   }
-
-  function drawKids(t) {
-    kidMobs.forEach(c => {
-      const x = Math.round(c.x), y = Math.round(c.y), rows = MINI[c.kind] || MINI.blob;
-      if (c.dying) {
-        const age = t - c.dying;
-        fade(MINI_SLEEP, x, y, age < 400 ? 1 : Math.max(0, 1 - (age - 400) / 900));
-        if (age >= 400) { const k = (age - 400) / 2200; fade(MINI_SOUL, x + 1, y - Math.round(k * Math.min(16, y + 2)), k < 0.6 ? 1 : 1 - (k - 0.6) / 0.4); }
-        return;
-      }
-      const s = c.k.state;
-      if (c.moving) { f.sprite(rows, x, y + (Math.floor(t / 160 + c.sd) % 2)); return; }
-      if (s === 'working') { // bobbing under its plant, flicking a drop up now and then
-        f.sprite(rows, x, y + (Math.floor(t / 400 + c.sd) % 2));
-        const p = (t + c.sd * 97) % 1200;
-        if (p < 400) f.px(x + 2, y - 2 - Math.floor(p / 200));
-      } else if (s === 'waiting') { f.sprite(rows, x, y); f.tiny('?', x + 1, y - 6); }
-      else if (s === 'done') f.sprite(rows, x, y + hop(t, c.sd));
-      else f.sprite(MINI_SLEEP, x, y);
-    });
-  }
-
-  // For the layout round in 50-round.js; goes when the round is decided.
-  globalThis.FARM = { CAST, MINI, MINI_SLEEP, MINI_SOUL, DUCKLING, STAGES, RIPE, FARMHOUSE, MAILBOX, ASK, HOME,
-    kindOf, sleepRows, seedOf, rng, critter, fade, departing, hop, zee, walk, wander, families, weatherOf, sky, cropOf, plant };
 
   return function farm(d, t) {
     const dt = last === null ? 50 : Math.min(200, Math.max(0, t - last)); last = t;
     const a = d.agents, w = weatherOf(d);
     scenery(a, w, t, dt);
     if (!a) return;
-    // the crops (one plant a bed, watered from the left), the children, the
-    // ducklings, then the grown-ups in depth order
+    // the plants (one a family, at its corner), the children, then the
+    // grown-ups in depth order
     mobs.forEach(m => {
-      if (m.bed === undefined) return;
-      const soil = BEDS[m.bed] + 8;
-      if (m.ripe) plant(RIPE[cropOf(m.kind)], 10, soil);
-      else plant(STAGES[Math.min(Math.floor(workOf(m) / GROW_MS), STAGES.length - 1)], 10, soil);
+      const c = CORNERS[m.corner];
+      if (!c || !m.growing) return;
+      const crop = project(m.r.name).crop;
+      plant(m.ripe ? RIPE[crop] : STAGES[Math.min(Math.floor(workOf(m) / GROW_MS), STAGES.length - 1)], c.px, c.y + 7);
     });
-    drawKids(t);
-    const shown = [...mobs.values()].filter(m => !(m.indoors && !m.moving));
-    shown.forEach(m => { // subagents running inside a turn: ducklings hopping over its head
-      const n = Math.min(m.r.helpers || 0, 3);
-      for (let i = 0; i < n; i++) f.sprite(DUCKLING, Math.round(m.x) + i * 3 - 1 + (n === 1 ? 2 : 0), Math.round(m.y) - 3 + (Math.floor(t / 250 + i) % 2 ? -1 : 0));
-    });
-    shown.sort((p, q) => p.y - q.y).forEach(m => {
-      const s = m.r.state;
-      if (m.dying) departing(m, t);
-      else if (m.moving) critter(m.kind, 'walk', m.x, m.y, t, m.sd);
-      else if (m.pose) critter(m.kind, m.pose, m.x, m.y, t, m.sd);
-      else if (s === 'waiting') { critter(m.kind, 'stand', m.x, m.y, t, m.sd); f.tiny('?', Math.round(m.x) + 3, Math.round(m.y) - 6); }
-      else if (s === 'working') critter(m.kind, 'water', m.x, m.y, t, m.sd);
-      else if (s === 'done') critter(m.kind, 'stand', m.x, m.y + hop(t, m.sd), t, m.sd);
-      else { critter(m.kind, 'sleep', m.x, m.y, t, m.sd); zee(m.x + 6, m.y + 2, t, m.sd); }
+    kids.forEach(c => child(c, t));
+    [...mobs.values()].filter(m => !(m.indoors && !m.moving)).sort((p, q) => p.y - q.y).forEach(m => {
+      const s = m.r.state, c = CORNERS[m.corner];
+      m.side = c ? c.side : 1;
+      const pose = m.moving ? 'walk' : m.watching ? 'stand' : s === 'working' ? 'water' : s === 'done' ? 'done' : s === 'idle' ? 'sleep' : 'stand';
+      const top = creature(m, pose, t);
+      if (s === 'waiting' && !m.moving && !m.leaving) f.tiny('?', Math.round(m.x) + 3, top - 6);
+      if (m.leaving === 'gate' && m.carry) f.sprite(RIPE[project(m.r.name).crop].slice(0, 4), Math.round(m.x) + 2, top - 5);
     });
 
     const now = Date.now();
-    events({ a, w, mobs, now, today: new Date(now).toDateString(), minutes: clockMin(d.sys.clock), ev: {} }, t);
+    events({ a, w, now, today: new Date(now).toDateString(), minutes: clockMin(d.sys.clock), ev: {} }, t);
   };
 })());

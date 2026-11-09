@@ -31,16 +31,23 @@ Each came from a round of mockups or from using it on the keyboard (2026-11-06).
 
 ## The agent zoo (farm)
 
-From four rounds on 2026-11-06 (`js/pages/30-farm.js`); the farm is the page that comes up by itself.
+From rounds on 2026-11-06 and a council on 2026-11-09 (`js/pages/30-farm.js`); the farm is the page that comes up by itself.
 
-- **Where a creature stands says what it is doing** (picked over per-session lanes and one big pet): beds in the middle for work, the fence at the bottom for questions, the farmhouse for sleep. At 0.17 mm a pixel, place reads before faces do.
-- **Farm over construction**: growing then ripe maps onto working then done; an unseen finished turn is a ripe crop waiting to be harvested, and harvests are the progress the events will hang on.
-- **Cast**: 8x8, front-on, faces cut out as holes, feet as separate pixels, a 2-frame idle at 2 fps (the reference sheet in `~/Downloads/g0jpddudups91.mp4`). One creature per project.
+- **Distance from the gate is how much an agent needs you.** Asking at the gate, a ripe crop in its corner, tending its corner, asleep on the porch, behind the lit window. The bottom edge is nearest the hand; the gate stands for you.
+- **Lane and gate**: bands from the top, one owner each: sky (0-9), home (10-22: a small house, a porch for two sleepers, the cart), the patch (24-108: eight corners either side of a lane), the gate (110-127: askers, the mailbox on a fence stub). Picked over four rows of beds, allotment plots and beanstalks: rows read as a list, plot edges as more dotted lines, and a tall stalk puts a long worker up among the sleepers.
+- **Position carries the whole state.** The firmware blanks the screen after 60 s without typing, so it is mostly seen as a snapshot; motion is a bonus. Creatures walk only to cross bands, along the lane; working and done stay in the corner, told apart by pose and a ripe crop.
+- **The lane is worn only at its ends** (a few stones by the porch, a worn patch at the gate). Stones all the way down read as another dotted line.
+- **A corner belongs to a project**, given in first-seen order and kept in the save for weeks: a mound marks it, one plant on it, no row lines or plot edges. A second session of the project takes the nearest free corner; with all eight taken, the project quiet longest gives its corner up.
+- **Species and crop come from the project**, the least used of each list in first-seen order (no hashing, no collisions). The model is not shown.
+- **Farm over construction**: growing then ripe maps onto working then done; an unseen finished turn is a ripe crop waiting to be harvested. A harvest is a finished plant you have seen; the cart takes nine.
+- **Cast**: 8x8, front-on, faces cut out as holes, feet as separate pixels, a 2-frame idle at 2 fps (the reference sheet in `~/Downloads/g0jpddudups91.mp4`). No ghost species: the ghost belongs to the night visitor.
+- **Size is context usage**: a pixel smaller under a third full, chunky over three quarters, normal when unknown.
 - **No speech bubbles**: a bare `?` over the head; bubbles were noise at this spacing.
-- **Nothing below the fence**: names and counts under it confused. Old questions are a mailbox with its flag up.
-- **Archived, a creature dies**: it keels over and its ghost rises and thins out.
-- **Events** (first take, unjudged): one short scene at a time, Johnny Castaway style. Earned ones follow the save and Agentique's totals (the cart takes every 9 crops, a scarecrow after 20 harvests, a balloon every 500 turns); the weather brings a rainbow after rain and a snowman after snow; a rooster at sunrise; rare ambient ones come on a random wait (crow, butterfly, shooting star, leaves on windy days, a departed ghost at night). What is earned stays drawn.
-- **Hierarchy is family** (first take, unjudged): a session another started is its child, a 5x5 of the parent's kind on the path under the family bed; a lead idle while its children work stands at the bed. Subagents inside a turn are ducklings over the head.
+- **Nothing below the gate**: names and counts under the fence confused. Old questions are a mailbox with its flag up.
+- **Homecoming, not death**: an archived session walks home through the farmhouse door. A merged one leaves through the gate carrying its crop, and a flag goes up on the house for an hour. The drama moves to a weekly scene (planned): first thing Monday a meteor clears the week (the ones who went home rise as ghosts, corners and the cart load reset) and keeps what was earned.
+- **Hierarchy is family**: a session another started is its child, a 5x5 of the parent's kind below the family's corner (two in front, the rest crowd in behind); a lead idle while its children work stands at its corner. Subagents inside a turn are ducklings over the head.
+- **The farm keeps going behind other pages** (`tick`): growth is timed by the wall clock, so it is right after a page switch, a blanking or a suspend.
+- **Events**: one short scene at a time, Johnny Castaway style. Earned ones follow the save and Agentique's totals (the cart drives off with every full load, a scarecrow beside the lane after 20 harvests, a balloon up the lane every 500 turns); the weather brings a rainbow after rain and a snowman after snow; a rooster on the roof at sunrise; rare ambient ones come on a random wait (crow, butterfly, shooting star, leaves on windy days, a visitor ghost at night). What is earned stays drawn.
 
 ## Working method
 
