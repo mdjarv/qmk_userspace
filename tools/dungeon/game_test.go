@@ -68,13 +68,16 @@ func TestSpaceStartsAgainAfterDying(t *testing.T) {
 }
 
 // A turn glides from the key press: a frame shortly after it is between the
-// old view and the new one (all within one torch-flicker period, 250 ms).
+// old view and the new one. Only the top half of the view is compared (rows
+// 0-63, above the hands, whose flame flickers), all within one torch-flicker
+// period (250 ms).
 func TestATurnGlidesFromThePress(t *testing.T) {
+	top := func(f []byte) []byte { return f[:256] }
 	start(7, 0)
-	before := render(1000)
+	before := top(render(1000))
 	press(buttons["q"], 1000)
-	mid, end := render(1080), render(1240)
+	mid, end := top(render(1080)), top(render(1240))
 	if bytes.Equal(mid, before) || bytes.Equal(mid, end) {
-		t.Fatal("the frame 80 ms after a turn is not between the old and new view")
+		t.Fatal("the view 80 ms after a turn is not between the old and new view")
 	}
 }
