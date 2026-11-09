@@ -40,7 +40,8 @@ func writeScenes(dir string, seed uint32, scale int) error {
 	for i, s := range scenes {
 		start(seed+uint32(i), 0)
 		path := filepath.Join(dir, fmt.Sprintf("%02d-%s.png", i, s.name))
-		if err := writePNG(path, render(s.run()), scale); err != nil {
+		t := s.run()
+		if err := writePNG(path, render(t), renderHUD(t), scale); err != nil {
 			return err
 		}
 	}

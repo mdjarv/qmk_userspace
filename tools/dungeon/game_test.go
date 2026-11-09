@@ -47,6 +47,7 @@ func TestSurvivesRandomPlay(t *testing.T) {
 			press(r.IntN(10), now) // past the last button too
 			if i%7 == 0 {
 				render(now)
+				renderHUD(now)
 			}
 		}
 	}

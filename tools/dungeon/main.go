@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/draw"
 	"image/png"
 	"os"
 	"strings"
@@ -48,7 +49,8 @@ func main() {
 	}
 
 	if *out != "" {
-		if err := writePNG(*out, render(now+uint32(*at)), *scale); err != nil {
+		t := now + uint32(*at)
+		if err := writePNG(*out, render(t), renderHUD(t), *scale); err != nil {
 			fail("%v", err)
 		}
 		return
@@ -99,20 +101,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// View draws the frame with half blocks, two pixels to a character cell, so
-// the pixels come out square: 32 columns by 64 lines.
+// View draws both screens with half blocks, two pixels to a character cell,
+// so the pixels come out square: 32 columns by 64 lines each.
 func (m model) View() tea.View {
-	f := render(m.now())
+	now := m.now()
+	frames := [2][]byte{render(now), renderHUD(now)}
 	var b strings.Builder
-	fmt.Fprintf(&b, "┌%s┐\n", strings.Repeat("─", width))
+	line := strings.Repeat("─", width)
+	fmt.Fprintf(&b, "┌%s┐   ┌%s┐\n", line, line)
 	for y := 0; y < height; y += 2 {
-		b.WriteString("│")
-		for x := range width {
-			b.WriteString([]string{" ", "▀", "▄", "█"}[btoi(lit(f, x, y))|btoi(lit(f, x, y+1))<<1])
+		for k, f := range frames {
+			if k > 0 {
+				b.WriteString("   ")
+			}
+			b.WriteString("│")
+			for x := range width {
+				b.WriteString([]string{" ", "▀", "▄", "█"}[btoi(lit(f, x, y))|btoi(lit(f, x, y+1))<<1])
+			}
+			b.WriteString("│")
 		}
-		b.WriteString("│\n")
+		b.WriteString("\n")
 	}
-	fmt.Fprintf(&b, "└%s┘\n", strings.Repeat("─", width))
+	fmt.Fprintf(&b, "└%s┘   └%s┘\n", line, line)
 	fmt.Fprintf(&b, "seed %d  ctrl+r new  ctrl+c quit", m.seed)
 	return tea.NewView(b.String())
 }
@@ -124,8 +134,18 @@ func btoi(b bool) int {
 	return 0
 }
 
-func writePNG(path string, f []byte, scale int) error {
-	img := frameImage(f, scale)
+// writePNG writes both screens side by side, as they sit on the keyboard's halves.
+func writePNG(path string, left, right []byte, scale int) error {
+	l, r := frameImage(left, scale), frameImage(right, scale)
+	gap := 6 * scale
+	img := image.NewGray(image.Rect(0, 0, 2*width*scale+gap, height*scale))
+	for y := range height * scale {
+		for x := range gap {
+			img.SetGray(width*scale+x, y, color.Gray{Y: 60})
+		}
+	}
+	draw.Draw(img, l.Bounds(), l, image.Point{}, draw.Src)
+	draw.Draw(img, r.Bounds().Add(image.Pt(width*scale+gap, 0)), r, image.Point{}, draw.Src)
 	w, err := os.Create(path)
 	if err != nil {
 		return err

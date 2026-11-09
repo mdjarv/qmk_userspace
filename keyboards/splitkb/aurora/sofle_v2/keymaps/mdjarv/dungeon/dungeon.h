@@ -29,8 +29,11 @@ enum dungeon_button {
 // Starts a new game. now_ms is a free-running millisecond clock; it may wrap.
 void dungeon_start(uint32_t seed, uint32_t now_ms);
 void dungeon_press(uint8_t button, uint32_t now_ms);
-// Draws the whole frame. Cheap enough to call 20 times a second.
+// Draws the left screen: the view, the hands, health. Call it up to 20 times a
+// second; the 3D view is only worked out again when something changes.
 void dungeon_render(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms);
+// Draws the right screen: the map and what the hero carries.
+void dungeon_render_hud(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms);
 
 #ifdef DUNGEON_SIM
 void dungeon_sim_put(uint8_t f, char what);
