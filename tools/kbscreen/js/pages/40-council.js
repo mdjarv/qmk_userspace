@@ -260,12 +260,12 @@ page('council', (function () {
   }
   const show = list => { fixture = { list, from: Date.now(), until: Date.now() + 60000 }; seen.clear(); posture.clear(); showPage('council'); };
   ['writing', 'thinking', 'tool', 'waiting', 'answered', 'failed', 'stopped'].forEach(s =>
-    action('council: ' + s, () => show([fake({ running: s !== 'answered' && s !== 'stopped' }, [s])])));
-  action('council: a round', () => show([fake({}, ['writing', 'thinking', 'tool', 'answered', 'waiting'])]));
+    action('council/all members: ' + s, () => show([fake({ running: s !== 'answered' && s !== 'stopped' }, [s])])));
+  action('council/the council: mid-round', () => show([fake({}, ['writing', 'thinking', 'tool', 'answered', 'waiting'])]));
   // A whole round played out: each member in turn thinks, maybe uses a tool,
   // writes and sits down; then the scribe writes and the answer waits.
   const TURNS = [[700, 0, 1600], [500, 900, 1500], [600, 0, 1400], [400, 700, 1200], [500, 0, 1300]]; // ms thinking, tool, writing
-  action('council: play a round', () => show(ms => {
+  action('council/the council: play a round', () => show(ms => {
     let at = 1500;
     const states = TURNS.map(([th, to, wr]) => {
       const p = ms - at; at += th + to + wr + 400;
@@ -274,13 +274,13 @@ page('council', (function () {
     const scribing = ms >= at && ms < at + 8000, done = ms >= at + 8000;
     return [fake({ round: 1, autoRounds: 1, running: ms < at, scribing, waiting: done, briefRound: ms >= at ? 1 : 0 }, states)];
   }));
-  action('council: scribing', () => show([fake({ running: false, round: 3, scribing: true, briefRound: 2 }, ['answered'])]));
-  action('council: answer waits', () => show([fake({ running: false, round: 3, waiting: true, briefRound: 3 }, ['answered'])]));
-  action('council: handed over', () => show([fake({ running: false, round: 3, briefRound: 3, handedOverRound: 3 }, ['answered'])]));
-  action('council: ended', () => show([fake({ status: 'ended', running: false, round: 3, briefRound: 3, handedOverRound: 3 }, ['stopped'])]));
-  action('council: several', () => show([fake({}, ['writing', 'thinking', 'waiting']), fake({ id: 'b' }, ['thinking']), fake({ id: 'c', status: 'ended', running: false }, ['stopped'])]));
-  action('council: none', () => show([]));
-  action('council: reset', () => { fixture = null; seen.clear(); });
+  action('council/the council: scribing', () => show([fake({ running: false, round: 3, scribing: true, briefRound: 2 }, ['answered'])]));
+  action('council/the council: answer waits', () => show([fake({ running: false, round: 3, waiting: true, briefRound: 3 }, ['answered'])]));
+  action('council/the council: handed over', () => show([fake({ running: false, round: 3, briefRound: 3, handedOverRound: 3 }, ['answered'])]));
+  action('council/the council: ended', () => show([fake({ status: 'ended', running: false, round: 3, briefRound: 3, handedOverRound: 3 }, ['stopped'])]));
+  action('council/how many: several', () => show([fake({}, ['writing', 'thinking', 'waiting']), fake({ id: 'b' }, ['thinking']), fake({ id: 'c', status: 'ended', running: false }, ['stopped'])]));
+  action('council/how many: none', () => show([]));
+  action('council: reset', () => { fixture = null; seen.clear(); posture.clear(); });
 
   return function council(d, t) {
     const list = order(councilsOf(d) || []);
