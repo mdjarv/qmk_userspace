@@ -50,8 +50,9 @@ func testData(playing bool, agents *Agents) jsData {
 	return toJS(s, []uint8{10, 50, 90}, []uint8{5, 5, 80}, m, agents, now)
 }
 
-// The built-in scripts draw every screen: the farm by itself, music while
-// playing, perf after a knob press, and the farm without Agentique.
+// The built-in scripts draw every screen: the farm by itself, fishing after a
+// knob press, music while playing, perf two presses on, and the farm without
+// Agentique.
 func TestBuiltInScreensRender(t *testing.T) {
 	r, err := newRenderer("")
 	if err != nil {
@@ -69,8 +70,9 @@ func TestBuiltInScreensRender(t *testing.T) {
 		presses int
 	}{
 		{"farm", testData(false, agents), 0},
+		{"fishing", testData(false, agents), 1}, // farm -> fishing
 		{"music", testData(true, agents), 0},
-		{"perf", testData(false, agents), 1}, // farm -> perf, round the end
+		{"perf", testData(false, agents), 2}, // farm -> fishing -> perf, round the end
 		{"no agentique", testData(false, nil), 0},
 	} {
 		r.frame(c.d, 0) // lets the script see the context before the presses
@@ -225,7 +227,8 @@ func TestNewPageFileIsLoaded(t *testing.T) {
 	d := testData(false, nil)
 	d.Media.VolumeChangedAgo = -1 // no volume readout over the page
 	r.frame(d, 0)
-	r.pressKnob(eventKnob) // farm -> zoo
+	r.pressKnob(eventKnob) // farm -> fishing
+	r.pressKnob(eventKnob) // fishing -> zoo
 	if f, err := r.frame(d, 0); err != nil || bytes.Count(f, []byte{0xFF}) != frameSize {
 		t.Fatalf("the zoo page did not show: %v", err)
 	}
