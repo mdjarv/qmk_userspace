@@ -6,7 +6,7 @@ Draws the Sofle's left OLED and sends it over Raw HID. The keyboard only shows t
 |---|---|
 | Perf | `/proc/stat`, `/proc/meminfo`, amdgpu `gpu_busy_percent` and `mem_info_vram_used` + `mem_info_gtt_used`, `power_supply/BAT*`, local time |
 | Music | `playerctl` (MPRIS) for track and art, `wpctl`/`pactl` for volume, `parec` on the default monitor for the spectrum |
-| Agents | Agentique's read API: `url` in kbscreen's config, or the local server from `~/.config/agentique/config.toml` |
+| Agents, councils | Agentique's read API (`/api/read/sessions`, `/api/read/councils`, and the same through `/api/read/machines/{id}/` for every machine it reaches): `url` in kbscreen's config, or the local server from `~/.config/agentique/config.toml` |
 | Weather | Open-Meteo (no key) for `[weather]` `lat` and `lon` in kbscreen's config, every 15 minutes |
 
 ## Editing the screens
@@ -42,6 +42,7 @@ Files load in this order, into one global scope:
 | `d.weather` | `null` without a place or until the first answer; else `sky` (`clear`, `cloud`, `fog`, `rain`, `snow`, `storm`), `code` (WMO), `temp` (°C), `wind` (km/h), `day`, `sunrise`, `sunset` (`07:22`) |
 | `d.keyboard` | `null` until the keyboard reports; else `layer` (`base`, `game`, `lower`, `raise`), `ctrl`, `shift`, `alt`, `gui` |
 | `d.agents` | `null` without Agentique; else `rows` (`{id, parent, helpers, context, name, state}`; `parent` is the session that started it, `helpers` the subagents running in its turn, `context` the percent of its context window used (-1 until Agentique's read API reports it), state `working`, `waiting`, `done`, `idle`; sessions updated in the last hour, newest first), `running`, `waiting`, `laterWaiting`, `laterIdle`, `oldestWait` (`3D`), `newQuestion` (a question in the last 10 minutes), `sessions` (`{id, parent, helpers, context, name, state, turns, merged}` for every live and parked session and those archived in the last day; state is a row's or `parked`, `archived`), `totals` (`sessions`, `turns`, `archived`, `merged`, `models` over everything Agentique lists) |
+| `d.councils` | `null` without Agentique; else Agentique councils from every machine (live ones and those ended in the last day), newest first: `id`, `title` (ASCII), `status` (`live`, `ended`), `running`, `round`, `autoRounds`, `scribing` (the scribe writes the brief), `waiting` (the answer waits to be handed over), `briefRound`, `handedOverRound`, `cast` (`{name, role, state, turn, tool}`, names ASCII; state `waiting`, `thinking`, `tool`, `writing`, `answered`, `failed`, `stopped`). Empty while Agentique has no councils route |
 
 `make screen` runs kbscreen in the foreground with the same scripts and preview (stop the service first); `DRY=1` also leaves the keyboard alone and logs the data once a second.
 

@@ -80,7 +80,34 @@ type Totals struct {
 	Models   int `json:"models"`
 }
 
+// Council is one Agentique council as its read API gives it (/api/read/councils):
+// personas debating over rounds while a scribe writes the brief. Live ones and
+// those ended in the last day.
+type Council struct {
+	ID              string          `json:"id"`
+	Title           string          `json:"title"`
+	Status          string          `json:"status"` // live, ended
+	Running         bool            `json:"running"`
+	Round           int             `json:"round"`
+	AutoRounds      int             `json:"autoRounds"`
+	Scribing        bool            `json:"scribing"`
+	Waiting         bool            `json:"waiting"` // the answer waits to be handed over
+	BriefRound      int             `json:"briefRound"`
+	HandedOverRound int             `json:"handedOverRound"`
+	UpdatedAt       string          `json:"updatedAt"`
+	Cast            []CouncilMember `json:"cast"`
+}
+
+type CouncilMember struct {
+	Name  string `json:"name"`
+	Role  string `json:"role"`
+	State string `json:"state"` // waiting, thinking, tool, writing, answered, failed, stopped
+	Turn  int    `json:"turn"`
+	Tool  string `json:"tool"`
+}
+
 type Agents struct {
+	Councils         []Council  // this machine's and every reachable one's, newest first
 	Rows             []AgentRow // updated in the last hour, newest first
 	Running, Waiting int        // over every live session
 	LaterWaiting     int        // questions older than an hour

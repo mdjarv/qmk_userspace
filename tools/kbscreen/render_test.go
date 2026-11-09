@@ -53,8 +53,8 @@ func testData(playing bool, agents *Agents) jsData {
 }
 
 // The built-in scripts draw every screen: the farm by itself, fishing after a
-// knob press, music while playing, perf two presses on, and the farm without
-// Agentique.
+// knob press, music while playing, perf three presses on, a running council
+// by itself, and the farm without Agentique.
 func TestBuiltInScreensRender(t *testing.T) {
 	r, err := newRenderer("")
 	if err != nil {
@@ -65,6 +65,9 @@ func TestBuiltInScreensRender(t *testing.T) {
 	}
 	agents := &Agents{Rows: []AgentRow{{Name: "QMK", State: agentWorking, ID: "a"}, {Name: "SEISI", State: agentWaiting, ID: "b"}}, Running: 1, Waiting: 2,
 		LaterWaiting: 1, OldestWait: 72 * time.Hour, NewQuestion: true}
+	council := *agents
+	council.Councils = []Council{{ID: "c1", Status: "live", Running: true, Round: 2, AutoRounds: 3,
+		Cast: []CouncilMember{{Name: "Socrates", State: "writing"}, {Name: "Wren", State: "thinking"}}}}
 	seen := map[string][]byte{}
 	for _, c := range []struct {
 		name    string
@@ -74,7 +77,8 @@ func TestBuiltInScreensRender(t *testing.T) {
 		{"farm", testData(false, agents), 0},
 		{"fishing", testData(false, agents), 1}, // farm -> fishing
 		{"music", testData(true, agents), 0},
-		{"perf", testData(false, agents), 2}, // farm -> fishing -> perf, round the end
+		{"perf", testData(false, agents), 3},     // farm -> fishing -> council -> perf, round the end
+		{"council", testData(true, &council), 0}, // over music
 		{"no agentique", testData(false, nil), 0},
 	} {
 		r.frame(c.d, 0) // lets the script see the context before the presses
@@ -230,7 +234,8 @@ func TestNewPageFileIsLoaded(t *testing.T) {
 	d.Media.VolumeChangedAgo = -1 // no volume readout over the page
 	r.frame(d, 0)
 	r.pressKnob(eventKnob) // farm -> fishing
-	r.pressKnob(eventKnob) // fishing -> zoo
+	r.pressKnob(eventKnob) // fishing -> council
+	r.pressKnob(eventKnob) // council -> zoo
 	if f, err := r.frame(d, 0); err != nil || bytes.Count(f, []byte{0xFF}) != frameSize {
 		t.Fatalf("the zoo page did not show: %v", err)
 	}

@@ -137,10 +137,11 @@ func (c *agentiqueClient) get(ctx context.Context, path string, v any) error {
 	return json.NewDecoder(resp.Body).Decode(v)
 }
 
-// agents reads the sessions of this Agentique and of every machine it
-// reaches (its read proxy, /api/read/machines/{id}/...), so agents on the
-// other machines are on the screen too. A machine that does not answer is
-// left out of this round.
+// agents reads the sessions and councils of this Agentique and of every
+// machine it reaches (its read proxy, /api/read/machines/{id}/...), so agents
+// on the other machines are on the screen too. A machine that does not answer
+// is left out of this round; councils that cannot be read (a 404 from an
+// Agentique without them) are none.
 func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
 	var s struct {
 		Sessions []readSession `json:"sessions"`
@@ -149,6 +150,7 @@ func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
 		return Agents{}, err
 	}
 	all := s.Sessions
+	councils := c.councils(ctx, "/api/read/councils")
 	var m struct {
 		Machines []struct {
 			ID    string `json:"id"`
@@ -164,28 +166,51 @@ func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
 			}
 		}
 	}
-	results := make(chan []readSession, len(c.machines))
+	type machine struct {
+		sessions []readSession
+		councils []Council
+	}
+	results := make(chan machine, len(c.machines))
 	for _, id := range c.machines {
 		go func() {
 			var r struct {
 				Sessions []readSession `json:"sessions"`
 			}
 			if c.get(ctx, "/api/read/machines/"+id+"/sessions", &r) != nil {
-				r.Sessions = nil
+				results <- machine{}
+				return
 			}
-			results <- r.Sessions
+			results <- machine{r.Sessions, c.councils(ctx, "/api/read/machines/"+id+"/councils")}
 		}()
 	}
 	for range c.machines {
-		all = append(all, <-results...)
+		m := <-results
+		all = append(all, m.sessions...)
+		councils = append(councils, m.councils...)
 	}
+	updated := func(c Council) time.Time { t, _ := time.Parse(time.RFC3339Nano, c.UpdatedAt); return t }
+	sort.SliceStable(councils, func(i, j int) bool { return updated(councils[i]).After(updated(councils[j])) })
 	for _, sess := range all {
 		if _, ok := c.names[sess.ProjectID]; !ok && time.Since(c.namesAt) > time.Minute {
 			c.loadProjects(ctx)
 			break
 		}
 	}
-	return summarize(all, c.names, time.Now()), nil
+	a := summarize(all, c.names, time.Now())
+	a.Councils = councils
+	return a, nil
+}
+
+// councils reads one Agentique's councils; none when it cannot (an Agentique
+// from before councils answers 404).
+func (c *agentiqueClient) councils(ctx context.Context, path string) []Council {
+	var r struct {
+		Councils []Council `json:"councils"`
+	}
+	if c.get(ctx, path, &r) != nil {
+		return nil
+	}
+	return r.Councils
 }
 
 // loadProjects names the projects of this machine and the ones it reaches;

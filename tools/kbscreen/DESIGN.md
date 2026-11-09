@@ -65,6 +65,17 @@ From the build and a council on 2026-11-09 (`js/pages/35-fishing.js`). The other
 - **Quirks only while working, and never change size or height**: speed, facing, or something beside the fish. Size is context and height is state.
 - **Event props stay out of the state bands**: the gull sits on the bow post, not on the catch; the jellyfish stays below the askers.
 
+## The council (campfire)
+
+Direction agreed 2026-11-09, first take (`js/pages/40-council.js`).
+
+- **Bands**: sky (other councils as small fires top right), the scribe's desk (top), the members around a fire (middle), the answer (bottom edge, nearest the hand, the farm gate's rule). An empty bottom means nothing waits for you.
+- **Pose is the member's state**: writing stands with arcs drifting to the fire, thinking stands with dots rising like smoke, tool stands holding a lantern, waiting sits upright, answered sits leaning back from the fire, failed slumps toward it, stopped dozes with a Z.
+- **Built-in personas by silhouette**, not name: Socrates a beard, Nietzsche a moustache, Odysseus a plumed helmet, Spark spiked hair, Razor blade-thin; anyone else hooded, the hood by a hash of the name.
+- **Rounds are fuel**: a log on the fire for each finished round (the newest falls in), the flame a size larger at two and four; pips under it for the round of the planned ones. Ended: embers and a wisp.
+- **The brief is a scroll**: hanging off the desk and longer each round while the scribe writes; rolled and sealed at the bottom with a bare `?` while it waits; gone once handed over.
+- **It comes up by itself** while a live council runs, scribes or waits, ahead of music (a council is minutes, music is hours).
+
 ## Working method
 
 Design work runs as rounds on one page of mockups, each option shown inside the real two-screen context, with a marked recommendation; answers come back short ("S2, P3", "less aggressive"). Now that the screens are JavaScript, a mockup can be a real page file running against live data: edit, look at http://localhost:8077, screenshot `frame.png` for a round.

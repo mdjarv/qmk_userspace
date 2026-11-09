@@ -158,7 +158,8 @@ func TestSpectrumPutsToneInItsBand(t *testing.T) {
 }
 
 // A server on another host, from the config file: its URL is used as given
-// and the token goes in the Authorization header.
+// and the token goes in the Authorization header. Councils come from every
+// machine, newest first; a 404 (an Agentique without them) is none.
 func TestRemoteAgentiqueClient(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer aqt_test" {
@@ -175,6 +176,10 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 			w.Write([]byte(`{"machines":[{"id":"m1","self":true},{"id":"m2","reach":"ok"},{"id":"m3","reach":"pending"}]}`))
 		case "/api/read/machines/m2/sessions":
 			w.Write([]byte(`{"sessions":[{"id":"w1","projectId":"p2","state":"running","parentId":"lead"}]}`))
+		case "/api/read/machines/m2/councils":
+			w.Write([]byte(`{"councils":[{"id":"old","status":"ended","updatedAt":"2026-11-09T08:00:00Z"},
+				{"id":"new","title":"Kärnfrågan","status":"live","running":true,"round":2,"autoRounds":3,"updatedAt":"2026-11-09T09:30:00.5Z",
+				"cast":[{"name":"Sókrates","role":"questioner","state":"tool","turn":2,"tool":"WebSearch"}]}]}`))
 		case "/api/read/machines/m2/projects":
 			w.Write([]byte(`{"projects":[{"id":"p2","name":"The Pint"}]}`))
 		default:
@@ -192,6 +197,11 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 	if err != nil || len(a.Rows) != 2 || a.Rows[0].Name != "QMK" ||
 		a.Rows[1] != (AgentRow{Name: "PINT", State: agentWorking, ID: "w1", Parent: "lead", Context: -1}) {
 		t.Fatalf("agents = %+v, %v", a, err)
+	}
+	d := toJS(Sys{}, nil, nil, Media{}, &a, time.Now())
+	if len(d.Councils) != 2 || d.Councils[0].ID != "new" || d.Councils[0].Title != "Karnfragan" || d.Councils[0].Round != 2 ||
+		d.Councils[0].Cast[0] != (jsCouncilMember{Name: "Sokrates", Role: "questioner", State: "tool", Turn: 2, Tool: "WebSearch"}) {
+		t.Fatalf("councils = %+v", d.Councils)
 	}
 	if _, err := newRemoteAgentiqueClient("host:19201", "x"); err == nil {
 		t.Fatal("a URL without a scheme must be refused")

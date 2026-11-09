@@ -287,6 +287,7 @@ type jsData struct {
 	Sys      jsSys       `json:"sys"`
 	Media    jsMedia     `json:"media"`
 	Agents   *jsAgents   `json:"agents"`   // null without Agentique
+	Councils []jsCouncil `json:"councils"` // null without Agentique
 	Keyboard *jsKeyboard `json:"keyboard"` // null until the keyboard reports
 	Weather  *jsWeather  `json:"weather"`  // null without a place in the config, or until the first answer
 }
@@ -384,6 +385,28 @@ type jsSession struct {
 	Context int `json:"context"` // percent of its context window used, -1 unknown
 }
 
+type jsCouncil struct {
+	ID              string            `json:"id"`
+	Title           string            `json:"title"` // ASCII
+	Status          string            `json:"status"`
+	Running         bool              `json:"running"`
+	Round           int               `json:"round"`
+	AutoRounds      int               `json:"autoRounds"`
+	Scribing        bool              `json:"scribing"`
+	Waiting         bool              `json:"waiting"`
+	BriefRound      int               `json:"briefRound"`
+	HandedOverRound int               `json:"handedOverRound"`
+	Cast            []jsCouncilMember `json:"cast"`
+}
+
+type jsCouncilMember struct {
+	Name  string `json:"name"` // ASCII
+	Role  string `json:"role"`
+	State string `json:"state"`
+	Turn  int    `json:"turn"`
+	Tool  string `json:"tool"`
+}
+
 var agentNames = []string{"idle", "working", "waiting", "done", "parked", "archived"}
 
 func toJS(sys Sys, cpuHist, gpuHist []uint8, m Media, a *Agents, now time.Time) jsData {
@@ -428,6 +451,15 @@ func toJS(sys Sys, cpuHist, gpuHist []uint8, m Media, a *Agents, now time.Time) 
 				Parent: s.Parent, Helpers: s.Helpers, Context: s.Context})
 		}
 		d.Agents = j
+		d.Councils = []jsCouncil{}
+		for _, c := range a.Councils {
+			jc := jsCouncil{ID: c.ID, Title: asciiOnly(c.Title), Status: c.Status, Running: c.Running, Round: c.Round, AutoRounds: c.AutoRounds,
+				Scribing: c.Scribing, Waiting: c.Waiting, BriefRound: c.BriefRound, HandedOverRound: c.HandedOverRound, Cast: []jsCouncilMember{}}
+			for _, m := range c.Cast {
+				jc.Cast = append(jc.Cast, jsCouncilMember{Name: asciiOnly(m.Name), Role: asciiOnly(m.Role), State: m.State, Turn: m.Turn, Tool: asciiOnly(m.Tool)})
+			}
+			d.Councils = append(d.Councils, jc)
+		}
 	}
 	return d
 }
