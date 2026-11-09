@@ -344,6 +344,7 @@ type jsAgentRow struct {
 	ID      string `json:"id"`
 	Parent  string `json:"parent"`  // "" for a top-level session
 	Helpers int    `json:"helpers"` // subagents running inside its turn
+	Context int    `json:"context"` // percent of its context window used, -1 unknown
 	Name    string `json:"name"`
 	State   string `json:"state"` // working, waiting, done, idle
 }
@@ -359,6 +360,7 @@ type jsSession struct {
 	Parent string `json:"parent"`
 	// Helpers are subagents running inside its turn.
 	Helpers int `json:"helpers"`
+	Context int `json:"context"` // percent of its context window used, -1 unknown
 }
 
 var agentNames = []string{"idle", "working", "waiting", "done", "parked", "archived"}
@@ -397,12 +399,12 @@ func toJS(sys Sys, cpuHist, gpuHist []uint8, m Media, a *Agents, now time.Time) 
 		j := &jsAgents{Rows: []jsAgentRow{}, Sessions: []jsSession{}, Totals: a.Totals, Running: a.Running, Waiting: a.Waiting, LaterWaiting: a.LaterWaiting,
 			LaterIdle: a.LaterIdle, OldestWait: ageText(a.OldestWait), NewQuestion: a.NewQuestion}
 		for _, r := range a.Rows {
-			j.Rows = append(j.Rows, jsAgentRow{ID: r.ID, Parent: r.Parent, Helpers: r.Helpers, Name: strings.ToUpper(asciiOnly(r.Name)), State: agentNames[min(int(r.State), len(agentNames)-1)]})
+			j.Rows = append(j.Rows, jsAgentRow{ID: r.ID, Parent: r.Parent, Helpers: r.Helpers, Context: r.Context, Name: strings.ToUpper(asciiOnly(r.Name)), State: agentNames[min(int(r.State), len(agentNames)-1)]})
 		}
 		for _, s := range a.Sessions {
 			j.Sessions = append(j.Sessions, jsSession{ID: s.ID, Name: strings.ToUpper(asciiOnly(s.Name)),
 				State: agentNames[min(int(s.State), len(agentNames)-1)], Turns: s.Turns, Merged: s.Merged,
-				Parent: s.Parent, Helpers: s.Helpers})
+				Parent: s.Parent, Helpers: s.Helpers, Context: s.Context})
 		}
 		d.Agents = j
 	}

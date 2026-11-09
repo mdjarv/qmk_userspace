@@ -53,10 +53,10 @@ type needsYou = struct {
 func TestAgentsNowAndLater(t *testing.T) {
 	now := time.Date(2026, 11, 6, 13, 0, 0, 0, time.UTC)
 	unseen := &needsYou{UnseenCompletedAt: "2026-11-06T09:00:00Z"}
-	two := 2
+	two, ctx := 2, 41.6
 	sessions := []readSession{
 		{ID: "s1", ProjectID: "p1", State: "idle", UpdatedAt: "2026-11-06T12:10:00Z", TurnCount: 4, Model: "opus"},
-		{ID: "s2", ProjectID: "p2", State: "running", UpdatedAt: "2026-11-06T12:58:00.5Z", TurnCount: 1, Model: "fable", ParentID: "s1", InFlight: &two},
+		{ID: "s2", ProjectID: "p2", State: "running", UpdatedAt: "2026-11-06T12:58:00.5Z", TurnCount: 1, Model: "fable", ParentID: "s1", InFlight: &two, ContextPct: &ctx},
 		// stopped (parked) and done stay off the rows, even with an unseen turn
 		{ID: "s3", ProjectID: "p3", State: "stopped", NeedsYou: unseen, UpdatedAt: "2026-11-06T12:59:00Z"},
 		{ID: "s4", ProjectID: "p3", State: "done", UpdatedAt: "2026-11-06T12:59:00Z"},
@@ -71,7 +71,7 @@ func TestAgentsNowAndLater(t *testing.T) {
 	}
 	names := map[string]string{"p1": "QMK Userspace", "p2": "The Pint", "p3": "Agentique", "p4": "seisiun", "p5": "terminal-drift", "p6": "hittat"}
 	a := summarize(sessions, names, now)
-	want := []AgentRow{{"PINT", agentWorking, "s2", "s1", 2}, {"HITTA", agentWaiting, "s6", "", 0}, {"TERMI", agentDone, "s7", "", 0}, {"QMK", agentIdle, "s1", "", 0}}
+	want := []AgentRow{{"PINT", agentWorking, "s2", "s1", 2, 42}, {"HITTA", agentWaiting, "s6", "", 0, -1}, {"TERMI", agentDone, "s7", "", 0, -1}, {"QMK", agentIdle, "s1", "", 0, -1}}
 	if len(a.Rows) != len(want) || a.Running != 1 || a.Waiting != 2 || a.LaterWaiting != 1 || a.LaterIdle != 1 ||
 		a.OldestWait != 72*time.Hour || !a.NewQuestion {
 		t.Fatalf("summarize = %+v", a)
@@ -182,7 +182,7 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 		t.Fatal("no client from config")
 	}
 	a, err := c.agents(context.Background())
-	if err != nil || len(a.Rows) != 1 || a.Rows[0] != (AgentRow{Name: "QMK", State: agentWorking}) {
+	if err != nil || len(a.Rows) != 1 || a.Rows[0] != (AgentRow{Name: "QMK", State: agentWorking, Context: -1}) {
 		t.Fatalf("agents = %+v, %v", a, err)
 	}
 	if _, err := newRemoteAgentiqueClient("host:19201", "x"); err == nil {

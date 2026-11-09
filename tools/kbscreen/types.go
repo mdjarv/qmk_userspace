@@ -56,6 +56,7 @@ type AgentRow struct {
 	ID      string
 	Parent  string // the session that started this one ("" for a top-level one)
 	Helpers int    // subagents running inside its turn
+	Context int    // percent of its context window used, -1 unknown
 }
 
 // Session is one session as the game sees it: live, parked, or archived in
@@ -67,6 +68,7 @@ type Session struct {
 	Merged   bool
 	Parent   string
 	Helpers  int
+	Context  int // percent of its context window used, -1 unknown
 }
 
 // Totals count every session Agentique lists, archived ones included.

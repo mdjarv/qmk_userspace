@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -29,17 +30,18 @@ type agentiqueClient struct {
 }
 
 type readSession struct {
-	ID         string `json:"id"`
-	ProjectID  string `json:"projectId"`
-	TurnCount  int    `json:"turnCount"`
-	Merged     bool   `json:"merged"`
-	Model      string `json:"model"`
-	ArchivedAt string `json:"archivedAt"`
-	ParentID   string `json:"parentId"`
-	InFlight   *int   `json:"agentsInFlight"`
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	UpdatedAt  string `json:"updatedAt"`
+	ID         string   `json:"id"`
+	ProjectID  string   `json:"projectId"`
+	TurnCount  int      `json:"turnCount"`
+	Merged     bool     `json:"merged"`
+	Model      string   `json:"model"`
+	ArchivedAt string   `json:"archivedAt"`
+	ParentID   string   `json:"parentId"`
+	InFlight   *int     `json:"agentsInFlight"`
+	ContextPct *float64 `json:"contextPercent"` // 0..100; absent until Agentique has a reading
+	Name       string   `json:"name"`
+	State      string   `json:"state"`
+	UpdatedAt  string   `json:"updatedAt"`
 	NeedsYou   *struct {
 		UnseenCompletedAt string `json:"unseenCompletedAt"`
 		ApprovalTool      string `json:"approvalTool"`
@@ -194,7 +196,11 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 		if s.InFlight != nil {
 			helpers = *s.InFlight
 		}
-		sess := Session{ID: s.ID, Name: short, Turns: s.TurnCount, Merged: s.Merged, Parent: s.ParentID, Helpers: helpers}
+		context := -1
+		if s.ContextPct != nil {
+			context = int(math.Round(min(max(*s.ContextPct, 0), 100)))
+		}
+		sess := Session{ID: s.ID, Name: short, Turns: s.TurnCount, Merged: s.Merged, Parent: s.ParentID, Helpers: helpers, Context: context}
 		a.Totals.Sessions++
 		a.Totals.Turns += s.TurnCount
 		if s.Merged {
@@ -252,7 +258,7 @@ func summarize(sessions []readSession, names map[string]string, now time.Time) A
 			}
 			continue
 		}
-		rows = append(rows, ranked{AgentRow{short, st, s.ID, s.ParentID, helpers}, updated})
+		rows = append(rows, ranked{AgentRow{short, st, s.ID, s.ParentID, helpers, context}, updated})
 	}
 	a.Totals.Models = len(models)
 	sort.SliceStable(rows, func(i, j int) bool { return rows[i].updated.After(rows[j].updated) })
