@@ -32,7 +32,8 @@ enum host_event_kind {
     // step us  [6] views finished (u8)  [7] main loops  [9] split transfers
     // sent  [11] failed  [13] messages the other half has had (u8, mod 256)
     // [14] state chunks it holds (u8 bits)  [15] slowest failed transfer us
-    // [17] slowest compose us. Offsets count the report's own two bytes.
+    // [17] slowest compose us  [21] link probes that worked (u8)  [22] failed
+    // (u8). Offsets count the report's own two bytes.
     HOST_EVENT_DUNGEON = 5,
 };
 

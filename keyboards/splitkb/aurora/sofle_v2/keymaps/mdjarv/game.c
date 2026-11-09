@@ -15,6 +15,7 @@
 #include QMK_KEYBOARD_H
 #include <string.h>
 #include "transactions.h"
+#include "serial.h"
 #include "game.h"
 #include "hostdata.h"
 #include "dungeon/dungeon.h"
@@ -31,6 +32,7 @@
 static struct {
     uint32_t step_max, step_sum, compose_max, fail_max;
     uint16_t steps, views, loops, rpc_ok, rpc_fail;
+    uint8_t  probe_ok, probe_fail;
     uint8_t  slave_rx, slave_have;
     uint32_t sent_at;
 } diag;
@@ -201,8 +203,8 @@ static void report(void) {
     diag.sent_at = timer_read32();
     uint32_t mean = diag.steps ? diag.step_sum / diag.steps : 0;
 #define U16(v) (uint8_t)((v) > 0xFFFF ? 0xFF : (v)&0xFF), (uint8_t)((v) > 0xFFFF ? 0xFF : (v) >> 8)
-    uint8_t d[19] = {U16(diag.step_max), U16(mean),      (uint8_t)MIN(diag.views, 255), U16(diag.loops), U16(diag.rpc_ok), U16(diag.rpc_fail),
-                     diag.slave_rx,      diag.slave_have, U16(diag.fail_max),             U16(diag.compose_max)};
+    uint8_t d[21] = {U16(diag.step_max), U16(mean),      (uint8_t)MIN(diag.views, 255), U16(diag.loops), U16(diag.rpc_ok), U16(diag.rpc_fail),
+                     diag.slave_rx,      diag.slave_have, U16(diag.fail_max),             U16(diag.compose_max), diag.probe_ok, diag.probe_fail};
 #undef U16
     host_send_report(HOST_EVENT_DUNGEON, d, sizeof(d));
     uint32_t sent_at = diag.sent_at;
@@ -210,8 +212,21 @@ static void report(void) {
     diag.sent_at = sent_at;
 }
 
+// The split link's own health, apart from the game's transfers: one plain
+// QMK transaction (the other half's key matrix checksum, a read with no side
+// effects) 20 times a second, counted in the report. An RPC transfer is four
+// such transactions in a row.
+static void probe(void) {
+    static uint32_t at;
+    if (!active || timer_elapsed32(at) < 50) return;
+    at = timer_read32();
+    if (soft_serial_transaction(GET_SLAVE_MATRIX_CHECKSUM)) diag.probe_ok++;
+    else diag.probe_fail++;
+}
+
 void game_task(void) {
     report();
+    probe();
     if (active) {
         uint32_t t0   = now_us();
         bool     done = dungeon_render_step(timer_read32());
