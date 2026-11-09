@@ -506,7 +506,80 @@ page('farm', (function () {
   }
   const IMPACT = [15, 62], CRATER = ['..#####..', '.#.....#.', '#.#.#.#.#'];
 
+  // ---- seasons and the calendar --------------------------------------------------
+  // The season changes the ground, not the cast: marks in the gaps the corners
+  // leave (flowers, tufts, fallen leaves, frost). The calendar is Swedish:
+  // first frost, Lucia, Christmas Eve, Midsommar.
+  const seasonOf = d => { const m = d.getMonth(); return m === 11 || m < 2 ? 'winter' : m < 5 ? 'spring' : m < 8 ? 'summer' : 'autumn'; };
+  const GROUND = (function () { // points clear of every corner, the scarecrow and the snowman
+    const busy = (x, y) => CORNERS.some(c => (x >= c.x - 1 && x <= c.x + 9 && y >= c.y - 1 && y <= c.y + 15) || (x >= c.px - 1 && x <= c.px + 5 && y >= c.y - 2 && y <= c.y + 9))
+      || (x <= 7 && y >= 95) || (x <= 6 && y >= 48 && y <= 58) || y > 104;
+    const pts = [];
+    for (let y = 26; y < 106; y += 5) for (let x = 1; x < 30; x += 4) {
+      const px = x + ((y * 7) % 3), py = y + ((x * 5) % 3);
+      if (!busy(px, py) && !busy(px + 2, py + 2)) pts.push([px, py]);
+    }
+    return pts;
+  })();
+  function ground(w, now) {
+    const d = new Date(now), season = seasonOf(d), cold = w.temp <= 0;
+    const snowCover = w.temp <= 2 && now - ((save.events || {}).snowed || 0) < 48 * 60 * MIN;
+    GROUND.forEach(([x, y], i) => {
+      if (snowCover) { f.px(x, y); f.px(x + 2, y + 1); f.px(x + 1, y + 3); }
+      else if (cold || season === 'winter') { if (i % 2 === 0) f.px(x, y); }
+      else if (season === 'spring') { if (i % 3 === 0) f.sprite(['.#.', '#.#', '.#.'], x, y); }
+      else if (season === 'summer') { if (i % 2 === 0) { f.px(x, y); f.px(x + 1, y - 1); f.px(x + 2, y); } }
+      else if (i % 2 === 0) { f.px(x, y); f.px(x + 1, y + 1); } // autumn: fallen leaves
+    });
+  }
+  const LUCIA = ['.#.#.#.', '.#.#.#.', '.#####.', '..###..', '..#.#..', '..###..', '.#####.', '#######', '.#####.', '.#####.', '.#...#.'];
+  const TOMTE = ['...#...', '..###..', '.#####.', '#######', '.#.#.#.', '.#####.', '..###..', '.#####.', '.#####.', '.#...#.'];
+  const SACK = ['.##', '###', '###'];
+  const GIFT = ['.#.', '###', '#.#', '###'];
+  const MAYPOLE = ['...#...', '..###..', '...#...', '#######', '#..#..#', '##.#.##', '...#...', '...#...', '...#...', '...#...', '...#...', '...#...', '...#...', '..###..'];
+  const MAYPOLE_AT = [0, 44];
+  // Midsommar Eve is the Friday from 19 to 25 June; the pole stands Friday to Sunday.
+  function midsommar(d) {
+    for (let day = 19; day <= 25; day++) { const e = new Date(d.getFullYear(), 5, day); if (e.getDay() === 5) return e; }
+  }
+  const maypoleUp = d => { const e = midsommar(d); return d >= e && d < new Date(e.getFullYear(), 5, e.getDate() + 3); };
+  // A walk up the lane from the gate to (x, y) and back (there and back over k 0..1).
+  function upTheLane(k, x, y, back) {
+    const kk = back ? (k < 0.5 ? k * 2 : (1 - k) * 2) : k;
+    const up = Math.min(kk / 0.7, 1), across = Math.max(0, (kk - 0.7) / 0.3);
+    return [Math.round(lerp(LANE, x, across)), Math.round(lerp(130, y, up))];
+  }
+
   const EVENTS = [
+    { // the first freezing day of the cold half of the year: frost spreads over the ground
+      name: 'frost', len: 5000, every: 0,
+      when: c => { const d = new Date(c.now), m = d.getMonth(), year = m < 6 ? d.getFullYear() - 1 : d.getFullYear(); return c.w.temp <= 0 && (m >= 8 || m < 3) && save.events.frost !== year; },
+      start: c => { const d = new Date(c.now); save.events.frost = d.getMonth() < 6 ? d.getFullYear() - 1 : d.getFullYear(); },
+      draw: (c, k) => GROUND.forEach(([x, y], i) => { if (Math.hypot(x - 5, y - 20) < k * 110) { f.px(x, y); if (i % 3 === 0) f.px(x + 1, y + 1); } }),
+    },
+    { // Lucia, 13 December: she walks up the lane with her candle crown and goes in
+      name: 'lucia', len: 14000, every: 0,
+      when: c => { const d = new Date(c.now); return d.getMonth() === 11 && d.getDate() === 13 && c.minutes >= 360 && save.events.lucia !== d.getFullYear(); },
+      start: c => { save.events.lucia = new Date(c.now).getFullYear(); },
+      draw: (c, k) => { const [x, y] = upTheLane(k, 1, 10); f.fill(x, y, 7, LUCIA.length, false); f.sprite(LUCIA, x, y); },
+    },
+    { // Christmas Eve: the tomte brings a sack, leaves a gift on the porch and goes
+      name: 'tomte', len: 16000, every: 0,
+      when: c => { const d = new Date(c.now); return d.getMonth() === 11 && d.getDate() === 24 && c.minutes >= 360 && save.events.tomte !== d.getFullYear(); },
+      start: c => { save.events.tomte = new Date(c.now).getFullYear(); },
+      end: c => { save.gift = new Date(c.now).getFullYear(); },
+      draw: (c, k) => {
+        const [x, y] = upTheLane(k, 10, 11, true);
+        f.fill(x, y, 10, TOMTE.length, false); f.sprite(TOMTE, x, y);
+        if (k < 0.5) f.sprite(SACK, x + 7, y + 5); else f.sprite(GIFT, 10, 17);
+      },
+    },
+    { // Midsommar Eve: the maypole is raised; it stands for the weekend
+      name: 'maypole', len: 6000, every: 0,
+      when: c => maypoleUp(new Date(c.now)) && save.events.maypole !== new Date(c.now).getFullYear(),
+      start: c => { save.events.maypole = new Date(c.now).getFullYear(); },
+      draw: (c, k) => { const h = Math.round(MAYPOLE.length * k); f.sprite(MAYPOLE.slice(0, h), MAYPOLE_AT[0], MAYPOLE_AT[1] + MAYPOLE.length - h); },
+    },
     { // first thing in the week: a meteor. It clears the week (the ones who
       // went home rise as ghosts, the corners are handed out afresh, the cart
       // load is gone) and keeps what was earned; the crater stays the morning.
@@ -677,6 +750,11 @@ page('farm', (function () {
     // the lane, worn only at its ends: by the porch and at the gate
     [[15, 24], [14, 27], [16, 30]].forEach(([x, y]) => f.fill(x, y, 2, 1));
     [[13, 104], [16, 105], [14, 107], [17, 108], [15, 109]].forEach(([x, y]) => f.px(x, y));
+    ground(w, Date.now());
+    // the calendar's keepsakes: the gift on the porch over Christmas, the maypole for Midsommar weekend
+    const today = new Date();
+    if (save.gift === today.getFullYear() && today.getMonth() === 11 && today.getDate() >= 24 && today.getDate() <= 26) f.sprite(GIFT, 10, 17);
+    if (maypoleUp(today) && (save.events || {}).maypole === today.getFullYear()) f.sprite(MAYPOLE, MAYPOLE_AT[0], MAYPOLE_AT[1]);
     // the corners that belong to a project: a mound each
     Object.values(save.projects || {}).forEach(p => { if (p.corner !== undefined) { const c = CORNERS[p.corner]; f.sprite(['.###.'], c.px, c.y + 8); } });
     if (save.crater && Date.now() - save.crater < 6 * 60 * MIN) f.sprite(CRATER, IMPACT[0] - 4, IMPACT[1] - 1);
