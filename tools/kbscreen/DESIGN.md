@@ -53,6 +53,18 @@ From rounds on 2026-11-06 and a council on 2026-11-09 (`js/pages/30-farm.js`); t
 - **A Swedish calendar** (first take): the first frost spreads over the ground; Lucia (13 December) walks up the lane with her candle crown; on Christmas Eve the tomte leaves a gift on the porch that stays to the 26th; on Midsommar Eve the maypole goes up and stands for the weekend.
 - **Events**: one short scene at a time, Johnny Castaway style. Earned ones follow the save and Agentique's totals (the cart drives off with every full load, a scarecrow beside the lane after 20 harvests, a balloon up the lane every 500 turns); the weather brings a rainbow after rain and a snowman after snow; a rooster on the roof at sunrise; rare ambient ones come on a random wait (crow, butterfly, shooting star, leaves on windy days, a visitor ghost at night). What is earned stays drawn.
 
+## Fishing (trial)
+
+From the build and a council on 2026-11-09 (`js/pages/35-fishing.js`). The other agent page; it takes turns with the farm.
+
+- **Depth is how much an agent needs you**, from the boat down: asking just under the boat with a bare `?`, done in the boat, working in the water, idle on the sand.
+- **Done means in the boat, and nothing else.** The catch plays the moment a turn ends, behind other pages and on a dark screen too, so a glance is always right; the ceremony is what a glance sometimes catches. Done fish waiting for the line line up at the hook (the column left of the askers); askers keep right of the line (x 7-31) so the reel never crosses one.
+- **The boat shows the newest catch whole on the gunwale**, still beating its tail while unseen; the two before it are tails, older ones are out of sight. Three whole fish read as a jumble of fins.
+- **No progress on this page.** The farm keeps what is earned; fishing holds only the present and the weather. No tallies, records, boat growth or running totals.
+- **The fisherman carries no data.** He reacts (arms up on a landing, recasts) and has idle routines, but his pose never stands for a state; it would repeat or contradict the fish.
+- **Quirks only while working, and never change size or height**: speed, facing, or something beside the fish. Size is context and height is state.
+- **Event props stay out of the state bands**: the gull sits on the bow post, not on the catch; the jellyfish stays below the askers.
+
 ## Working method
 
 Design work runs as rounds on one page of mockups, each option shown inside the real two-screen context, with a marked recommendation; answers come back short ("S2, P3", "less aggressive"). Now that the screens are JavaScript, a mockup can be a real page file running against live data: edit, look at http://localhost:8077, screenshot `frame.png` for a round.

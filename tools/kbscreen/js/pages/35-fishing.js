@@ -44,7 +44,7 @@ page('fishing', (function () {
   };
   const NAMES = Object.keys(KINDS);
 
-  const store = () => (save.fish = save.fish || { projects: {}, caught: 0 });
+  const store = () => (save.fish = save.fish || { projects: {} });
   // A project's kind, given once in first-seen order: the least used.
   function kindFor(name) {
     const ps = store().projects;
@@ -249,7 +249,9 @@ page('fishing', (function () {
     // done: hooked, reeled up and landed, one at a time; on first sight
     // already in the boat. Waiting its turn, it hovers where it is.
     const done = [...fish.values()].filter(m => !m.leaving && m.r.state === 'done' && !m.landed && !m.fly && !m.hook);
-    done.forEach((m, i) => { if (m.fresh) { m.landed = t + 1 + i; m.fresh = false; } else { m.tx = m.x; m.ty = m.y; } });
+    done.forEach((m, i) => { if (m.fresh) { m.landed = t + 1 + i; m.fresh = false; } });
+    // the rest line up at the hook, left of the askers, next one on top
+    done.filter(m => !m.landed).forEach((m, i) => { m.tx = 0; m.ty = SURF + 5 + i * 8 });
     if (!catching) {
       const next = done.find(m => !m.landed);
       if (next) { catching = next.id; next.hook = { phase: 'sink', y: SURF + 1 }; }
@@ -331,7 +333,6 @@ page('fishing', (function () {
         const n = pile().length + 1, [px, py] = pileSpot(m, n - 1, n);
         fly(m, t, px, py, 700, TIP[1], () => {
           m.hook = null; catching = null; m.landed = t;
-          store().caught = (store().caught || 0) + 1;
         });
       }
     }
@@ -443,7 +444,7 @@ page('fishing', (function () {
     // the catch, the fisherman, the hull over them
     const p = pile();
     p.forEach((m, i) => {
-      if (i === p.length - 1) knock(shape(m, 0), m.x, m.y + bob);
+      if (i === p.length - 1) knock(shape(m, Math.floor(t / 600 + m.sd) % 2), m.x, m.y + bob); // the newest still beats its tail
       else if (p.length - 2 - i < TAILS.length) f.sprite(TAIL, m.x, m.y + bob);
     });
     f.fill(FISHER_X - 1, FISHER_Y + bob, 9, 9, false);
