@@ -12,6 +12,7 @@
 
 page('farm', (function () {
   delete save.demo; // left by the design rounds
+  if (save.projects && save.cornersV !== 2) { Object.values(save.projects).forEach(p => delete p.corner); save.cornersV = 2; } // corners were filled from the top
 
   // ---- the cast: 8x8, front-on, two idle frames each ------------------------
   // acc is what still shows when it lies down to sleep (ears, antenna, cap).
@@ -244,6 +245,22 @@ page('farm', (function () {
   let lastTick = null, insideIdle = 0, insideBusy = 0;
   const workOf = m => (m.workMs || 0) + (m.since ? Date.now() - m.since : 0);
 
+  // The free corner farthest from the taken ones (the one nearest the middle
+  // of the patch when none is), so a few projects spread over all of it
+  // rather than filling it from the top. -1 when all are taken.
+  function spread(owner) {
+    const mid = i => [CORNERS[i].x + 4, CORNERS[i].y + 4];
+    const taken = CORNERS.map((c, i) => i).filter(i => owner(i) !== undefined);
+    let best = -1, score = -Infinity;
+    CORNERS.forEach((c, i) => {
+      if (owner(i) !== undefined) return;
+      const [x, y] = mid(i);
+      const s = taken.length ? Math.min(...taken.map(j => { const [a, b] = mid(j); return Math.hypot(x - a, y - b); })) : -Math.hypot(x - 16, y - 66);
+      if (s > score) { score = s; best = i; }
+    });
+    return best;
+  }
+
   // A project's corner: kept while the project lives; a second session of it
   // takes the nearest free corner; with all eight taken, the project quiet
   // longest gives its corner up.
@@ -251,7 +268,7 @@ page('farm', (function () {
     const ps = save.projects, p = project(m.r.name);
     const owner = i => Object.keys(ps).find(n => ps[n].corner === i);
     if (p.corner === undefined) {
-      let free = CORNERS.findIndex((c, i) => owner(i) === undefined);
+      let free = spread(owner);
       if (free < 0) {
         const live = new Set([...mobs.values()].map(x => x.r.name));
         const quiet = Object.keys(ps).filter(n => ps[n].corner !== undefined && !live.has(n)).sort((x, y) => ps[x].seen - ps[y].seen)[0];
@@ -372,7 +389,7 @@ page('farm', (function () {
       if (k.state === 'waiting') { c.tx = Math.min(kidAsk, 26); c.ty = 115; kidAsk += 6; }
       else if (pc && p.growing) {
         const j = at.get(k.family) || 0; at.set(k.family, j + 1);
-        c.tx = Math.min(pc.x + (j === 0 ? 0 : j === 1 ? 5 : 3), 27); c.ty = pc.y + 10 - (j > 1 ? 1 : 0);
+        c.tx = Math.min(pc.x + (j === 0 ? 0 : j === 1 ? 6 : 3), 27); // a pixel apart, so two read as two c.ty = pc.y + 10 - (j > 1 ? 1 : 0);
       } else if (p) { c.tx = Math.min(Math.round(p.tx) + 9, 27); c.ty = p.ty + 3; }
       else { c.tx = DOOR[0]; c.ty = DOOR[1] + 2; }
     });
