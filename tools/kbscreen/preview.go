@@ -108,18 +108,61 @@ func (p *previewServer) setError(err error) {
 
 func (p *previewServer) page(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Write([]byte(`<!doctype html><meta charset=utf-8><title>kbscreen</title>
-<body style="background:#111;color:#ccc;font:14px monospace;display:flex;gap:24px;padding:24px">
-<img id=f src=frame.png style="image-rendering:pixelated;border:2px solid #333;align-self:flex-start">
-<div><div id=a style="display:flex;flex-wrap:wrap;gap:6px;max-width:480px"></div>
-<pre id=e style="color:#f77;white-space:pre-wrap"></pre></div>
-<script>setInterval(async()=>{document.getElementById('f').src='frame.png?'+Date.now();
-document.getElementById('e').textContent=await (await fetch('error')).text()},100);
-let shown='';setInterval(async()=>{const names=(await (await fetch('actions')).json()||[]).sort((x,y)=>(y==='reset')-(x==='reset'));const key=names.join('|');if(key===shown)return;shown=key;
-const a=document.getElementById('a');a.replaceChildren(...names.map(n=>{const b=document.createElement('button');b.textContent=n;
-b.style.cssText='background:#222;color:#ccc;border:1px solid #444;font:13px monospace;padding:4px 8px;cursor:pointer';
-b.onclick=()=>fetch('action?name='+encodeURIComponent(n),{method:'POST'});return b}))},1000)</script>`))
+	w.Write([]byte(previewHTML))
 }
+
+// The preview: the frame on the left; on the right the actions the pages
+// offer, grouped by page and section ('page/section: label'), each page's
+// own reset beside its name and the reset of everything on top.
+const previewHTML = `<!doctype html><meta charset=utf-8><title>kbscreen</title>
+<style>
+:root{--bg:#121212;--fg:#e8e8e8;--muted:#9a9a9a;--faint:#666;--btn:#1e1e1e;--line:#333;--hover:#2a2a2a;--ok:#4caf7a}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.4 system-ui,sans-serif;display:flex;gap:32px;padding:24px;align-items:flex-start}
+#f{image-rendering:pixelated;border:1px solid var(--line);flex:none}
+main{display:flex;flex-direction:column;gap:28px;max-width:560px}
+#top{display:flex;align-items:center;gap:12px}
+#top p{margin:0;color:var(--faint);font-size:13px}
+button{background:var(--btn);color:var(--fg);border:1px solid var(--line);border-radius:6px;font:13px system-ui,sans-serif;padding:5px 10px;cursor:pointer;transition:background .15s,border-color .15s}
+button:hover{background:var(--hover)}
+button.done{border-color:var(--ok);background:#1f3328}
+#reset{background:var(--fg);color:var(--bg);border-color:var(--fg);font-weight:600;padding:7px 14px}
+#reset:hover{background:#fff}
+section h2{margin:0 0 10px;font-size:16px;font-weight:600;display:flex;align-items:baseline;gap:12px;text-transform:capitalize}
+section h2 a{font-size:12px;font-weight:400;color:var(--muted);cursor:pointer;text-transform:none}
+section h2 a:hover{color:var(--fg)}
+.row{display:grid;grid-template-columns:110px 1fr;gap:10px;align-items:baseline;margin:6px 0}
+.row span{color:var(--faint);font-size:12px;text-align:right}
+.row div{display:flex;flex-wrap:wrap;gap:6px}
+#a{display:flex;flex-direction:column;gap:24px}
+#e{color:#f77;white-space:pre-wrap;margin:0}
+</style>
+<img id=f src=frame.png>
+<main>
+<div id=top><button id=reset hidden>Reset to now</button><p>Ends every scene set off here and goes back to the automatic page.</p></div>
+<div id=a></div>
+<pre id=e></pre>
+</main>
+<script>
+const post=(n,b)=>{fetch('action?name='+encodeURIComponent(n),{method:'POST'});if(b){b.classList.add('done');setTimeout(()=>b.classList.remove('done'),600)}};
+function make(tag,props,kids){const e=Object.assign(document.createElement(tag),props||{});(kids||[]).forEach(k=>e.append(k));return e}
+document.getElementById('reset').onclick=e=>post('reset',e.target);
+setInterval(async()=>{document.getElementById('f').src='frame.png?'+Date.now();
+document.getElementById('e').textContent=await (await fetch('error')).text()},100);
+let shown='';
+setInterval(async()=>{
+  const names=await (await fetch('actions')).json()||[];const key=names.join('|');if(key===shown)return;shown=key;
+  document.getElementById('reset').hidden=!names.includes('reset');
+  const pages=new Map();
+  names.forEach(n=>{const m=/^([^/:]+)(?:\/([^:]+))?: (.+)$/.exec(n);if(!m)return;
+    const [,pg,sec,label]=m;if(!pages.has(pg))pages.set(pg,{reset:null,secs:new Map()});const p=pages.get(pg);
+    if(label==='reset'&&!sec){p.reset=n;return}
+    const s=sec||'';if(!p.secs.has(s))p.secs.set(s,[]);p.secs.get(s).push([label,n])});
+  document.getElementById('a').replaceChildren(...[...pages].map(([pg,p])=>make('section',{},[
+    make('h2',{},[pg].concat(p.reset?[make('a',{textContent:'reset '+pg,onclick:e=>post(p.reset)})]:[])),
+    ...[...p.secs].map(([s,acts])=>make('div',{className:'row'},[make('span',{textContent:s}),
+      make('div',{},acts.map(([label,n])=>make('button',{textContent:label,onclick:e=>post(n,e.target)})))]))])));
+},1000);
+</script>`
 
 func (p *previewServer) png(w http.ResponseWriter, _ *http.Request) {
 	p.mu.Lock()

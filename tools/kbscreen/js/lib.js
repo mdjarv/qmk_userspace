@@ -99,7 +99,10 @@ const TICKS = [];
 function tick(fn) { TICKS.push(fn); }
 
 // Things a page lets you set off by hand for testing (the preview page at
-// :8077 shows them as buttons): action(name, fn).
+// :8077 shows them as buttons): action(name, fn). Name them
+// 'page/section: label' ('farm/calendar: lucia'); the preview groups them by
+// page and section in the order they were registered. '<page>: reset' ends
+// the page's shows and goes with the page's heading.
 const ACTIONS = new Map();
 function action(name, fn) { ACTIONS.set(name, fn); }
 

@@ -353,7 +353,7 @@ func TestFarmActionIsAShowOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(r.actions(), "farm: meteor") {
+	if !slices.Contains(r.actions(), "farm/weekly: meteor") {
 		t.Fatalf("actions = %v", r.actions())
 	}
 	a := &Agents{Rows: []AgentRow{{Name: "QMK", State: agentWorking, ID: "s1"}}, Sessions: []Session{{ID: "s1", Name: "QMK", State: agentWorking}}}
@@ -362,7 +362,7 @@ func TestFarmActionIsAShowOnly(t *testing.T) {
 	r.frame(d, 0)
 	r.checkpoint()
 	before := r.saveJSON
-	if err := r.runAction("farm: meteor"); err != nil {
+	if err := r.runAction("farm/weekly: meteor"); err != nil {
 		t.Fatal(err)
 	}
 	for ms := int64(50); ms < 16000; ms += 50 {
