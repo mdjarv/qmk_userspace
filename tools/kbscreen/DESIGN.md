@@ -39,6 +39,7 @@ From four rounds on 2026-11-06; the farm is the page that comes up by itself.
 - **No speech bubbles**: a bare `?` over the head; bubbles were noise at this spacing.
 - **Nothing below the fence**: names and counts under it confused. Old questions are a mailbox with its flag up.
 - **Archived, a creature dies**: it keels over and its ghost rises and thins out.
+- **Events** (first take, unjudged): one short scene at a time, Johnny Castaway style. Earned ones follow the save and Agentique's totals (the cart takes every 9 crops, a scarecrow after 20 harvests, a balloon every 500 turns); the weather brings a rainbow after rain and a snowman after snow; a rooster at sunrise; rare ambient ones come on a random wait (crow, butterfly, shooting star, leaves on windy days, a departed ghost at night). What is earned stays drawn.
 - **Hierarchy is family** (first take, unjudged): a session another started is its child, a 5x5 of the parent's kind on the path under the family bed; a lead idle while its children work stands at the bed. Subagents inside a turn are ducklings over the head.
 
 ## Working method

@@ -71,7 +71,11 @@ type Session struct {
 
 // Totals count every session Agentique lists, archived ones included.
 type Totals struct {
-	Sessions, Turns, Archived, Merged, Models int
+	Sessions int `json:"sessions"`
+	Turns    int `json:"turns"`
+	Archived int `json:"archived"`
+	Merged   int `json:"merged"`
+	Models   int `json:"models"`
 }
 
 type Agents struct {

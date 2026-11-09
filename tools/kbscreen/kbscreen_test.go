@@ -7,6 +7,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"testing"
@@ -210,6 +211,34 @@ func TestSysMemoryAndBattery(t *testing.T) {
 		write(t, root+"/sys/class/power_supply/BAT0/status", []byte(status+"\n"))
 		if _, st := newSysReader(root).battery(); st != want {
 			t.Fatalf("%s: state %d, want %d", status, st, want)
+		}
+	}
+}
+
+// The weather comes from Open-Meteo's answer for the place in the config: the
+// WMO code grouped into a sky, sunrise and sunset as clock times.
+func TestWeatherFromOpenMeteo(t *testing.T) {
+	var query url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		query = r.URL.Query()
+		w.Write([]byte(`{"current":{"temperature_2m":-1.5,"weather_code":73,"is_day":0,"wind_speed_10m":12.0},
+			"daily":{"time":["2026-11-09"],"sunrise":["2026-11-09T07:22"],"sunset":["2026-11-09T16:00"]}}`))
+	}))
+	defer srv.Close()
+	cfg := filepath.Join(t.TempDir(), "config.toml")
+	write(t, cfg, []byte("[agentique]\ntoken = \"aqt_x\"\n\n[weather]\nlat = 56.182  # Gräsvik\nlon = 15.590\n"))
+	lat, lon, ok := weatherPlace(cfg)
+	if !ok || lat != 56.182 || lon != 15.59 {
+		t.Fatalf("place = %v %v %v", lat, lon, ok)
+	}
+	w, err := fetchWeather(context.Background(), srv.Client(), srv.URL, lat, lon)
+	want := Weather{Sky: "snow", Code: 73, Temp: -1.5, Wind: 12, Day: false, Sunrise: "07:22", Sunset: "16:00"}
+	if err != nil || w != want || query.Get("latitude") != "56.182" || query.Get("longitude") != "15.590" {
+		t.Fatalf("weather = %+v, %v (query %v)", w, err, query)
+	}
+	for code, sky := range map[int]string{0: "clear", 3: "cloud", 45: "fog", 61: "rain", 81: "rain", 86: "snow", 95: "storm"} {
+		if skyOf(code) != sky {
+			t.Fatalf("skyOf(%d) = %s, want %s", code, skyOf(code), sky)
 		}
 	}
 }

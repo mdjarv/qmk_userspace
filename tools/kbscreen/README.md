@@ -7,6 +7,7 @@ Draws the Sofle's left OLED and sends it over Raw HID. The keyboard only shows t
 | Perf | `/proc/stat`, `/proc/meminfo`, amdgpu `gpu_busy_percent` and `mem_info_vram_used` + `mem_info_gtt_used`, `power_supply/BAT*`, local time |
 | Music | `playerctl` (MPRIS) for track and art, `wpctl`/`pactl` for volume, `parec` on the default monitor for the spectrum |
 | Agents | Agentique's read API: `url` in kbscreen's config, or the local server from `~/.config/agentique/config.toml` |
+| Weather | Open-Meteo (no key) for `[weather]` `lat` and `lon` in kbscreen's config, every 15 minutes |
 
 ## Editing the screens
 
@@ -37,6 +38,7 @@ Files load in this order, into one global scope:
 |---|---|
 | `d.sys` | `cpu`, `gpu` (percent), `cpuHistory`, `gpuHistory` (last 32 s, oldest first), `ramUsed`, `ramTotal`, `vramUsed`, `vramTotal` (GiB; VRAM includes GTT spill), `battery` (percent), `batteryState` (`charging`, `discharging`, `hidden`), `clock` (`14:53`) |
 | `d.media` | `playing`, `title`, `artist` (ASCII), `position`, `length` (s), `volume` (percent, -1 unknown), `muted`, `volumeChangedAgo` (ms, -1 never), `art` (128 bytes, 32x32 in OLED layout), `bands` (10 spectrum bands 0..255) |
+| `d.weather` | `null` without a place or until the first answer; else `sky` (`clear`, `cloud`, `fog`, `rain`, `snow`, `storm`), `code` (WMO), `temp` (°C), `wind` (km/h), `day`, `sunrise`, `sunset` (`07:22`) |
 | `d.keyboard` | `null` until the keyboard reports; else `layer` (`base`, `game`, `lower`, `raise`), `ctrl`, `shift`, `alt`, `gui` |
 | `d.agents` | `null` without Agentique; else `rows` (`{id, parent, helpers, name, state}`; `parent` is the session that started it, `helpers` the subagents running in its turn, state `working`, `waiting`, `done`, `idle`; sessions updated in the last hour, newest first), `running`, `waiting`, `laterWaiting`, `laterIdle`, `oldestWait` (`3D`), `newQuestion` (a question in the last 10 minutes), `sessions` (`{id, parent, helpers, name, state, turns, merged}` for every live and parked session and those archived in the last day; state is a row's or `parked`, `archived`), `totals` (`sessions`, `turns`, `archived`, `merged`, `models` over everything Agentique lists) |
 
@@ -62,7 +64,12 @@ Files load in this order, into one global scope:
    url = "https://host.tailnet.ts.net:19201"  # leave out for this machine's own server
    token = "aqt_..."
    ```
-   Without a token the agent screen says NO LINK.
+   Without a token the agent screen says NO LINK. The farm's weather takes the place in the same file:
+   ```toml
+   [weather]
+   lat = 56.182
+   lon = 15.590
+   ```
 3. `make screen-install` from the repo root: installs `~/.local/bin/kbscreen` and the `kbscreen` systemd user unit.
 
 The frame protocol is in `keyboards/splitkb/aurora/sofle_v2/keymaps/mdjarv/hostdata.h`; `frame.go` is the other side.

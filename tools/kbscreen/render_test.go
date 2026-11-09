@@ -283,3 +283,20 @@ func TestSaveSurvivesReloadAndRestart(t *testing.T) {
 	r.frame(d, 0)
 	saved(r, `{"n":1}`)
 }
+
+// The pages read every field of d by its json name, nested ones included.
+func TestPagesSeeAgentTotals(t *testing.T) {
+	dir := copyScripts(t)
+	touch(t, filepath.Join(dir, "main.js"), "function render(d, t) { save.turns = d.agents.totals.turns; return f.buf; }\n", time.Now())
+	r, err := newRenderer(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.frame(testData(false, &Agents{Totals: Totals{Turns: 3945}}), 0); err != nil {
+		t.Fatal(err)
+	}
+	r.checkpoint()
+	if r.saveJSON != `{"turns":3945}` {
+		t.Fatalf("save = %s", r.saveJSON)
+	}
+}

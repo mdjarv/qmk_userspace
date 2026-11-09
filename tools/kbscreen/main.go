@@ -33,6 +33,7 @@ type state struct {
 	hasAgents        bool
 	artURL           string // the track whose art media.Art is, or is waiting for
 	keyboard         *jsKeyboard
+	weather          *Weather // nil until the first answer, or without a place
 }
 
 func (s *state) update(f func(*state)) {
@@ -50,13 +51,16 @@ func (s *state) data(now time.Time) jsData {
 	}
 	d := toJS(s.sys, s.cpuHist, s.gpuHist, s.media, a, now)
 	d.Keyboard = s.keyboard
+	if w := s.weather; w != nil {
+		d.Weather = &jsWeather{Sky: w.Sky, Code: w.Code, Temp: w.Temp, Wind: w.Wind, Day: w.Day, Sunrise: w.Sunrise, Sunset: w.Sunset}
+	}
 	return d
 }
 
 func main() {
 	home, _ := os.UserHomeDir()
 	config := flag.String("config", filepath.Join(home, ".config/kbscreen/config.toml"),
-		"config file: [agentique] url and token (see README)")
+		"config file: [agentique] url and token, [weather] lat and lon (see README)")
 	scripts := flag.String("scripts", "", "directory with lib.js, pages/*.js and main.js, reloaded on save (default: the built-in ones)")
 	preview := flag.String("preview", "", "serve a live preview of the screen on this address, e.g. localhost:8077")
 	dry := flag.Bool("dry", false, "do not look for the keyboard; log the data once a second")
@@ -91,6 +95,9 @@ func main() {
 	go watchMedia(ctx, st, spectrum)
 	if c := agentiqueFromConfig(*config, filepath.Join(home, ".config/agentique")); c != nil {
 		go pollAgents(ctx, st, c)
+	}
+	if lat, lon, ok := weatherPlace(*config); ok {
+		go pollWeather(ctx, st, lat, lon)
 	}
 	if *dry {
 		go logData(ctx, st)

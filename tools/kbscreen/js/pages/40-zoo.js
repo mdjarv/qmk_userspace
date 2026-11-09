@@ -240,6 +240,7 @@ function site(name, scenery, layout, under, opts) {
       else { critter(m.kind, 'sleep', m.x, m.y, t, m.sd); zee(m.x + 6, m.y + 2, t, m.sd); }
     });
     chips.draw(dt, 128);
+    if (opts.over) opts.over(a, mobs, t, dt, st);
   });
 }
 function slots(by, mobs, state, places, overflow) {
@@ -311,39 +312,176 @@ const MOON = ['.###.', '##...', '#....', '##...', '.###.'];
 const SUN = ['.###.', '#####', '#####', '#####', '.###.'];
 const CLOUD = ['...###....', '.##...##..', '#.......##', '##########'];
 
-// Simulated weather, 80 s a loop: sun, cloud, rain, snow, a clear night.
-const SKIES = ['sun', 'cloud', 'rain', 'snow', 'night'];
+// ---- weather ---------------------------------------------------------------
+// The live farm has the real weather (d.weather, Open-Meteo); without it, fair
+// weather and night by the clock. The demo cycles through all of it, 12 s each.
+const DEMO_SKIES = ['clear', 'cloud', 'rain', 'fog', 'snow', 'night'];
 function weatherOf(d, t, demo) {
-  const sim = demo ? SKIES[Math.floor(t / 16000) % SKIES.length] : 'sun';
   const h = Number(d.sys && d.sys.clock ? d.sys.clock.slice(0, 2) : 12);
-  return { sky: sim, night: sim === 'night' || h >= 21 || h < 6 };
+  if (demo) {
+    const sim = DEMO_SKIES[Math.floor(t / 12000) % DEMO_SKIES.length];
+    return { sky: sim === 'night' ? 'clear' : sim, night: sim === 'night', temp: sim === 'snow' ? -2 : 18, wind: sim === 'rain' ? 25 : 8 };
+  }
+  const w = d.weather;
+  if (!w) return { sky: 'clear', night: h >= 21 || h < 6, temp: 10, wind: 5 };
+  return { sky: w.sky, night: !w.day, temp: w.temp, wind: w.wind, sunrise: w.sunrise };
 }
 const flakes = [];
 function sky(w, t, dt) {
-  if (w.night) {
+  const wet = w.sky === 'rain' || w.sky === 'storm', clouded = w.sky !== 'clear';
+  if (w.night && !clouded) {
     f.sprite(MOON, 2, 1);
     [[10, 2], [15, 6], [5, 10], [13, 12]].forEach(p => f.px(p[0], p[1]));
-  } else if (w.sky === 'sun') {
+  } else if (!w.night && !clouded) {
     f.sprite(SUN, 2, 2);
     const r = Math.floor(t / 1000) % 2; // the rays turn, slowly
     (r ? [[4, 0], [4, 8], [0, 4], [8, 4]] : [[1, 1], [7, 1], [1, 7], [7, 7]]).forEach(p => f.px(p[0], p[1]));
   }
-  if (w.sky === 'cloud' || w.sky === 'rain' || w.sky === 'snow') {
-    f.sprite(CLOUD, Math.round(((t / 400) % 44)) - 12, 1);
-    f.sprite(CLOUD, Math.round(((t / 600 + 20) % 44)) - 12, 8);
+  // clouds drift with the wind
+  const drift = 300 + 900 / (1 + w.wind / 10);
+  if (clouded && w.sky !== 'fog') {
+    f.sprite(CLOUD, Math.round((t / drift) % 44) - 12, 1);
+    f.sprite(CLOUD, Math.round((t / (drift * 1.5) + 20) % 44) - 12, 8);
+    if (w.sky === 'storm') f.sprite(CLOUD, Math.round((t / (drift * 1.2) + 32) % 44) - 12, 4);
   }
-  if (w.sky === 'rain' || w.sky === 'snow') {
-    const snow = w.sky === 'snow', want = snow ? 10 : 7;
-    while (flakes.length < want) flakes.push({ x: Math.random() * W, y: 12 - Math.random() * 40, s: Math.random() });
+  if (w.sky === 'fog') // banks of haze, slowly moving
+    [43, 65, 87].forEach((y, i) => { const o = Math.floor(t / (400 + i * 150)) % 6; for (let x = -o; x < W; x += 6) f.fill(x, y, 3, 1); });
+  if (wet || w.sky === 'snow') {
+    const snow = w.sky === 'snow', want = snow ? 10 : w.sky === 'storm' ? 12 : 7, slant = Math.min(w.wind / 40, 1);
+    while (flakes.length < want) flakes.push({ x: Math.random() * (W + 10) - 10 * slant, y: 12 - Math.random() * 40, s: Math.random() });
     for (let i = flakes.length - 1; i >= 0; i--) {
       const p = flakes[i];
       p.y += dt * (snow ? 0.012 : 0.07);
-      if (snow) p.x += Math.sin(t / 700 + p.s * 6) * 0.15;
+      p.x += snow ? Math.sin(t / 700 + p.s * 6) * 0.15 : dt * 0.07 * slant;
       if (p.y > 121) { flakes.splice(i, 1); continue; }
       f.px(p.x, p.y);
-      if (!snow) f.px(p.x, p.y + 1);
+      if (!snow) f.px(p.x - slant, p.y + 1);
     }
   } else flakes.length = 0;
+}
+
+// ---- events ----------------------------------------------------------------
+// A short scene now and then, Johnny Castaway style. One at a time, checked
+// every 5 s. when(c) says it may start; every (ms, wall clock, kept in the
+// save) how long at least between two; mean, for the ambient ones, how long
+// on average after that, so they come unannounced. start(c) and end(c)
+// change the game; draw(c, k, t) draws it, k from 0 to 1 over len ms.
+// c: { d, a, w (weather), g (the save), mobs, now (Date.now()), today }.
+const MIN = 60000;
+const CROW = [['#...#', '.#.#.', '..#..'], ['.....', '.#.#.', '#.#.#']];
+const PERCH = [['..##', '.###', '###.', '.#..'], ['....', '..##', '####', '.#..']];
+const BUTTERFLY = [['#.#', '.#.', '#.#'], ['.#.', '.#.', '.#.']];
+const CART = ['.......', '#######', '#.....#', '#######', '.#...#.'];
+const SCARECROW = ['..###..', '..#.#..', '..###..', '#######', '#..#..#', '..###..', '..###..', '...#...', '...#...', '...#...', '...#...'];
+const BALLOON = ['..###..', '.#####.', '#######', '##.#.##', '#######', '.#####.', '..###..', '..#.#..', '..#.#..', '..###..'];
+const SNOWMAN = ['.###.', '#.#.#', '#####', '.###.', '#####', '#####', '.###.'];
+const ROOSTER = [['.##..', '###..', '.####', '.###.', '..#..'], ['.##..', '###.#', '.####', '.###.', '..#..']];
+const lerp = (a, b, k) => a + (b - a) * Math.max(0, Math.min(1, k));
+const clockMin = s => (s && s.length >= 5 ? Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5)) : -1);
+
+const EVENTS = [
+  { // a full pile: the cart comes, loads it and goes; the farm sells a load
+    name: 'cart', len: 10000, every: 0,
+    when: c => (c.g.harvest || 0) >= 9,
+    end: c => { c.g.harvest = Math.max(0, c.g.harvest - 9); c.g.sold = (c.g.sold || 0) + 1; },
+    draw: (c, k) => {
+      const x = k < 0.3 ? lerp(-8, 12, k / 0.3) : k < 0.7 ? 12 : lerp(12, 33, (k - 0.7) / 0.3), loaded = k >= 0.5;
+      f.sprite(CART, Math.round(x), 101);
+      if (loaded) f.sprite(['.#.#.#.'], Math.round(x), 100);
+      c.hidePile = k >= 0.5;
+    },
+  },
+  { // twenty harvests in all: a scarecrow goes up, and stays
+    name: 'scarecrow', len: 5000, every: 0,
+    when: c => (c.g.harvested || 0) >= 20 && !(c.g.unlocked || {}).scarecrow,
+    end: c => { c.g.unlocked = Object.assign(c.g.unlocked || {}, { scarecrow: true }); },
+    draw: (c, k) => { const h = Math.round(SCARECROW.length * k); f.sprite(SCARECROW.slice(0, h), 25, 112 - h); },
+  },
+  { // every 500 turns Agentique has run: a balloon goes up
+    name: 'balloon', len: 20000, every: 0,
+    when: c => { const n = Math.floor(c.a.totals.turns / 500); if (c.g.turnMark == null) c.g.turnMark = n; // count from the first sight, not from history return n > c.g.turnMark; },
+    start: c => { c.g.turnMark = Math.floor(c.a.totals.turns / 500); },
+    draw: (c, k, t) => f.sprite(BALLOON, Math.round(lerp(4, 16, k) + Math.sin(t / 900) * 2), Math.round(lerp(110, -12, k))),
+  },
+  { // the rain has stopped and the sun is out: a rainbow over the beds
+    name: 'rainbow', len: 60000, every: 30 * MIN,
+    when: c => !c.w.night && c.w.sky !== 'rain' && c.now - (c.g.events.rainEnded || 0) < 10 * MIN,
+    draw: (c, k) => {
+      const share = k < 0.2 ? k / 0.2 : k > 0.8 ? (1 - k) / 0.2 : 1;
+      [9, 7, 5].forEach(r => { for (let a = 0; a <= 32; a++) { const th = Math.PI * a / 32, x = 10 + Math.cos(th) * r, y = 22 - Math.sin(th) * r; if (((a * 7 + r) % 10) / 10 < share) f.px(x, y); } });
+    },
+  },
+  { // after snow, while it is freezing: someone builds a snowman
+    name: 'snowman', len: 6000, every: 12 * 60 * MIN,
+    when: c => c.w.temp <= 1 && c.now - (c.g.events.snowed || 0) < 6 * 60 * MIN,
+    end: c => { c.g.snowman = c.now; },
+    draw: (c, k) => { const h = Math.round(SNOWMAN.length * k); f.sprite(SNOWMAN.slice(SNOWMAN.length - h), 13, 20 - h); },
+  },
+  { // the first light of the day: the rooster on the roof
+    name: 'rooster', len: 8000, every: 0,
+    when: c => { const m = c.minutes, s = clockMin(c.w.sunrise) >= 0 ? clockMin(c.w.sunrise) : 7 * 60; return !c.w.night && m >= s && m < s + 120 && c.g.events.rooster !== c.today; },
+    start: c => { c.g.events.rooster = c.today; },
+    draw: (c, k, t) => f.sprite(ROOSTER[Math.floor(t / 400) % 2], 24, 1),
+  },
+  { // a crow on a growing bed, pecking, until it is shooed off
+    name: 'crow', len: 9000, every: 20 * MIN, mean: 40 * MIN,
+    when: c => !c.w.night && [...c.mobs.values()].some(m => m.bed !== undefined && !m.ripe),
+    start: c => { const m = [...c.mobs.values()].find(m => m.bed !== undefined && !m.ripe); c.ev.bed = m ? m.bed : 0; },
+    draw: (c, k, t) => {
+      const ty = BEDS[c.ev.bed] + 2, flap = CROW[Math.floor(t / 150) % 2];
+      if (k < 0.25) f.sprite(flap, Math.round(lerp(33, 22, k / 0.25)), Math.round(lerp(-4, ty, k / 0.25)));
+      else if (k < 0.8) f.sprite(PERCH[Math.floor(t / 400) % 2], 22, ty);
+      else f.sprite(flap, Math.round(lerp(22, -6, (k - 0.8) / 0.2)), Math.round(lerp(ty, -4, (k - 0.8) / 0.2)));
+    },
+  },
+  { // a warm, dry day: a butterfly over the meadow
+    name: 'butterfly', len: 8000, every: 10 * MIN, mean: 30 * MIN,
+    when: c => !c.w.night && c.w.temp >= 12 && c.w.sky !== 'rain' && c.w.sky !== 'snow',
+    draw: (c, k, t) => f.sprite(BUTTERFLY[Math.floor(t / 200) % 2], Math.round(lerp(-3, 33, k)), Math.round(40 + Math.sin(k * 12) * 6)),
+  },
+  { // a clear night: a shooting star
+    name: 'star', len: 1500, every: 10 * MIN, mean: 30 * MIN,
+    when: c => c.w.night && c.w.sky === 'clear',
+    draw: (c, k) => { for (let i = 0; i < 4; i++) { const kk = k - i * 0.06; if (kk > 0 && kk < 1) f.px(lerp(30, 4, kk), lerp(1, 14, kk)); } },
+  },
+  { // a windy day: leaves blowing over the farm
+    name: 'leaves', len: 6000, every: 15 * MIN, mean: 20 * MIN,
+    when: c => c.w.wind >= 20 && c.w.sky !== 'snow',
+    draw: (c, k, t) => [[20, 0], [55, 0.2], [80, 0.35], [35, 0.5]].forEach(([y, d]) => {
+      const kk = (k - d) / 0.5;
+      if (kk > 0 && kk < 1) { const x = lerp(-2, 33, kk), yy = y + Math.sin(t / 200 + y) * 2; f.px(x, yy); f.px(x + 1, yy + (Math.floor(t / 300) % 2)); }
+    }),
+  },
+  { // at night the departed come back to look in, now and then
+    name: 'visitor', len: 10000, every: 30 * MIN, mean: 90 * MIN,
+    when: c => c.w.night && (c.g.departed || 0) > 0,
+    draw: (c, k, t) => fade(SOUL, Math.round(lerp(33, -8, k)), Math.round(24 + Math.sin(t / 500) * 2), 0.5),
+  },
+];
+
+// The scheduler, one per farm. In the demo every event takes its turn.
+function eventsFor(demo) {
+  let cur = null, nextCheck = 0, demoIdx = 0;
+  return function (c, t) {
+    const ev = c.g.events = c.g.events || {};
+    ev.last = ev.last || {};
+    // what the weather did lately, for the rainbow and the snowman
+    if (c.w.sky === 'rain' || c.w.sky === 'storm') ev.raining = true;
+    else if (ev.raining) { ev.raining = false; ev.rainEnded = c.now; }
+    if (c.w.sky === 'snow') ev.snowed = c.now;
+    c.hidePile = false;
+    if (!cur && t >= nextCheck) {
+      nextCheck = t + (demo ? 14000 : 5000);
+      const pick = demo ? EVENTS[demoIdx++ % EVENTS.length]
+        : EVENTS.find(e => e.when(c) && c.now - (ev.last[e.name] || 0) >= e.every && (!e.mean || Math.random() < 5000 / e.mean));
+      if (pick) { cur = { e: pick, at: t }; c.ev = cur; ev.last[pick.name] = c.now; if (pick.start) pick.start(c); }
+    }
+    if (!cur) return;
+    c.ev = cur;
+    const k = (t - cur.at) / cur.e.len;
+    if (k >= 1) { if (cur.e.end && !(demo && cur.e.name !== 'cart')) cur.e.end(c); cur = null; return; }
+    cur.e.draw(c, k, t);
+  };
 }
 
 // ---- families --------------------------------------------------------------
@@ -383,16 +521,19 @@ function families(a) {
 }
 
 function farm(name, demo) {
-const kidMobs = new Map();
+const kidMobs = new Map(), events = eventsFor(demo);
 const GROW_MS = demo ? 1500 : 180000;
 site(name, (a, t, st) => {
-  const w = weatherOf(st.d, t, demo);
+  const w = st.w = weatherOf(st.d, t, demo), g = game(demo);
   sky(w, t, st.dt || 50);
   f.sprite(FARMHOUSE, 20, 8);
   if (w.night) f.fill(22, 14, 2, 2); // the lamp is on
   if (w.sky === 'snow') for (let x = 21; x < 32; x++) f.px(x, 7 + Math.abs(x - 26) / 2 | 0);
+  // what the farm has earned stays: the scarecrow, a snowman while it lasts
+  if ((g.unlocked || {}).scarecrow) f.sprite(SCARECROW, 25, 101);
+  if (g.snowman && Date.now() - g.snowman < 48 * 60 * MIN && w.temp <= 3) f.sprite(SNOWMAN, 13, 13);
   // the harvest pile beside the house, a dot per crop brought in
-  const n = Math.min(game(demo).harvest || 0, 9);
+  const n = st.hidePile ? 0 : Math.min(g.harvest || 0, 9);
   for (let k = 0; k < n; k++) f.fill(17 - (k % 3) * 2, 18 - Math.floor(k / 3) * 2, 1, 1);
   if (a && a.laterIdle) zee(26, 3, t, 3);
   // the fence: posts and rails, the mailbox at the gate
@@ -414,7 +555,7 @@ site(name, (a, t, st) => {
     m.kids = ks;
     m.busy = !m.dying && !m.home && (st === 'working' || ks.some(k => k.state === 'working'));
     const ripe = !m.dying && !m.home && !m.busy && (st === 'done' || ks.some(k => k.state === 'done'));
-    if (m.bed !== undefined && !m.busy && !ripe) { if (m.ripe) g.harvest++; m.bed = undefined; m.work = 0; m.ripe = false; }
+    if (m.bed !== undefined && !m.busy && !ripe) { if (m.ripe) { g.harvest++; g.harvested = (g.harvested || 0) + 1; } m.bed = undefined; m.work = 0; m.ripe = false; }
     if (m.bed !== undefined) { m.ripe = ripe; taken.add(m.bed); }
   });
   // what the save keeps of each bed; a session gone for good takes its own
@@ -460,6 +601,13 @@ site(name, (a, t, st) => {
   born: (m, r) => { const c = (game(demo).crops || {})[r.id]; if (c) { m.bed = c.bed; m.work = c.work; m.ripe = c.ripe; } },
   died: () => { const g = game(demo); g.departed = (g.departed || 0) + 1; },
   prepare: families,
+  over: (a, mobs, t, dt, st) => {
+    const now = Date.now(), clock = (st.d.sys && st.d.sys.clock) || '12:00';
+    const c = { d: st.d, a, w: st.w, g: game(demo), mobs, now, today: new Date(now).toDateString(),
+      minutes: clockMin(clock), ev: {} };
+    events(c, t);
+    st.hidePile = c.hidePile;
+  },
 });
 
 // The children: beside their parent's bed while it is worked (each at a

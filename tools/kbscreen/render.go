@@ -267,6 +267,17 @@ type jsData struct {
 	Media    jsMedia     `json:"media"`
 	Agents   *jsAgents   `json:"agents"`   // null without Agentique
 	Keyboard *jsKeyboard `json:"keyboard"` // null until the keyboard reports
+	Weather  *jsWeather  `json:"weather"`  // null without a place in the config, or until the first answer
+}
+
+type jsWeather struct {
+	Sky     string  `json:"sky"` // clear, cloud, fog, rain, snow, storm
+	Code    int     `json:"code"`
+	Temp    float64 `json:"temp"` // °C
+	Wind    float64 `json:"wind"` // km/h
+	Day     bool    `json:"day"`
+	Sunrise string  `json:"sunrise"` // 07:22
+	Sunset  string  `json:"sunset"`
 }
 
 type jsKeyboard struct {
