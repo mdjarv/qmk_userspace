@@ -74,14 +74,15 @@ func TestBuiltInScreensRender(t *testing.T) {
 		d       jsData
 		presses int
 	}{
-		{"farm", testData(false, agents), 0},
-		{"fishing", testData(false, agents), 1}, // farm -> fishing
-		{"music", testData(true, agents), 0},
+		{"farm", testData(true, agents), 0},      // music playing does not take over
+		{"fishing", testData(false, agents), 1},  // farm -> fishing
 		{"perf", testData(false, agents), 3},     // farm -> fishing -> council -> perf, round the end
-		{"council", testData(true, &council), 0}, // over music
+		{"music", testData(true, agents), 4},     // -> music
+		{"council", testData(true, &council), 0}, // a council at work comes up by itself
 		{"no agentique", testData(false, nil), 0},
 	} {
-		r.frame(c.d, 0) // lets the script see the context before the presses
+		r.pressKnob(eventKnobLong) // back to the automatic page
+		r.frame(c.d, 0)            // lets the script see the context before the presses
 		for range c.presses {
 			if err := r.pressKnob(eventKnob); err != nil {
 				t.Fatalf("%s: knob: %v", c.name, err)
@@ -310,7 +311,7 @@ func TestPagesSeeAgentTotals(t *testing.T) {
 	}
 }
 
-// The farm keeps going behind another page: with music on screen, a session
+// The farm keeps going behind another page: with perf on screen, a session
 // that works gets its bed, and once it is done and seen its crop is harvested.
 func TestFarmRunsWhileHidden(t *testing.T) {
 	r, err := newRenderer("")
@@ -324,8 +325,12 @@ func TestFarmRunsWhileHidden(t *testing.T) {
 	step := func(state uint8) {
 		t.Helper()
 		a := &Agents{Rows: []AgentRow{{Name: "QMK", State: state, ID: "s1"}}, Sessions: []Session{{ID: "s1", Name: "QMK", State: state}}}
+		r.frame(testData(false, a), 0)
+		if _, err := r.vm.RunString("showPage('perf')"); err != nil { // the farm is not drawn
+			t.Fatal(err)
+		}
 		for i := range 3 {
-			if _, err := r.frame(testData(true, a), int64(i)*50); err != nil { // music playing: the farm is not drawn
+			if _, err := r.frame(testData(false, a), int64(i+1)*50); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -337,12 +342,12 @@ func TestFarmRunsWhileHidden(t *testing.T) {
 	}
 	step(agentWorking)
 	if _, ok := saved.Crops["s1"]; !ok {
-		t.Fatalf("no bed for a session working behind the music page: %s", r.saveJSON)
+		t.Fatalf("no bed for a session working behind the perf page: %s", r.saveJSON)
 	}
 	step(agentDone)
 	step(agentIdle)
 	if saved.Harvest != 1 || saved.Crops["s1"] != nil {
-		t.Fatalf("the crop was not harvested behind the music page: %s", r.saveJSON)
+		t.Fatalf("the crop was not harvested behind the perf page: %s", r.saveJSON)
 	}
 }
 

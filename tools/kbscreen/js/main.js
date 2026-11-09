@@ -5,8 +5,9 @@
 // change within a second; a version that fails to load leaves the last good
 // one running.
 //
-// A council at work or with an answer waiting shows the council, music
-// playing shows music, otherwise the farm and the fishing page take turns. A
+// A council at work or with an answer waiting shows the council, otherwise
+// the farm and the fishing page take turns. Music is only a knob press away:
+// coming up by itself when a track started was annoying. A
 // knob press shows the next page until that choice changes, a double press the
 // previous one, a long press goes back to the automatic choice. The screens stay on while music plays,
 // and dim at night. A volume change shows over any page for 1.5 s.
@@ -15,7 +16,7 @@
 let shown = null, override = null, overrideContext = null, lastData = null;
 
 const has = name => PAGES.some(p => p.name === name);
-// Without music the farm and the fishing page take turns, ten minutes each.
+// The farm and the fishing page take turns, ten minutes each.
 const ROTATION = ['farm', 'fishing'], TURN_MS = 10 * 60000;
 let now = 0;
 // A live council debating, writing its brief, with an answer not yet handed
@@ -30,7 +31,6 @@ const councilBusy = d => (d.councils || []).some(c => {
 });
 function context(d) {
   if (councilBusy(d) && has('council')) return 'council';
-  if (d.media.playing && has('music')) return 'music';
   const turns = ROTATION.filter(has);
   if (turns.length) return turns[Math.floor(now / TURN_MS) % turns.length];
   return has('perf') ? 'perf' : PAGES[0].name;

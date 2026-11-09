@@ -26,7 +26,7 @@ Each came from a round of mockups or from using it on the keyboard (2026-11-06).
 - **A notification replaces something rather than adding**: the asking robot takes the battery percent's place on perf and the album art's corner on music.
 - **Charging is a plug, not a lightning bolt** (the bolt looked odd at this size).
 - **Recent first, old things fold away.** Sessions quiet for an hour leave the farm; questions left for days become the mailbox, idle ones a Z from the farmhouse, instead of pinning the screen.
-- **The screen never switches itself to demand attention.** Music playing selects the music screen (that is context, not an alert); otherwise the farm shows.
+- **The screen never switches itself to demand attention.** The farm and the fishing page take turns; a council at work comes up (context, not an alert). Music does not: switching to it whenever a track started was annoying, so it is a knob press away (2026-11-09).
 - **Right screen:** text bands for layer and mods were rejected, and having no indicators was missed on the keyboard; the original icon set under half the animation was the answer.
 
 ## The agent zoo (farm)
