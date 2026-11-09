@@ -800,6 +800,11 @@ page('farm', (function () {
   // The preview page's buttons: every event, the quirks, and the weather for a minute.
   EVENTS.forEach(e => action('farm: ' + e.name, () => { forced = e; showPage('farm'); }));
   action('farm: quirks', () => { mobs.forEach(m => { m.quirkAt = 1; }); showPage('farm'); });
+  // back to now: no scene running, the real weather, nobody lying struck
+  action('farm: reset', () => {
+    forced = null; cur = null; forcedWeather = null; cartAway = false; wipe = 0;
+    mobs.forEach(m => { m.quirk = 0; });
+  });
   ['clear', 'cloud', 'rain', 'fog', 'snow', 'storm', 'night'].forEach(sky => action('weather: ' + sky, () => { forcedWeather = { sky, until: Date.now() + 60000 }; showPage('farm'); }));
 
   // ---- the page ------------------------------------------------------------------

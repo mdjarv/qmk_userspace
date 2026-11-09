@@ -15,14 +15,15 @@ page('council', (function () {
   const seedOf = s => { let h = 7; for (const c of String(s)) h = (h * 33 + c.charCodeAt(0)) % 9973; return h; };
 
   // ---- the cast: 7 wide, front-on, faces cut out, shown standing ------------
-  // head: the rows down to the chin. Built-in personas have a look of their
-  // own; anyone else is hooded, the hood picked by a hash of the name.
+  // head: the rows down to the chin, mouth shut; mouth: the row that opens,
+  // and how it looks open. Built-in personas have a look of their own; anyone
+  // else is hooded, the hood picked by a hash of the name.
   const LOOKS = {
-    socrates: { head: ['..###..', '.#####.', '.#.#.#.', '.#####.', '##...##', '#######', '.#####.', '..#.#..'] }, // bald, a beard
-    nietzsche: { head: ['.#####.', '.#####.', '.#.#.#.', '.#####.', '#######', '#.#.#.#', '..###..'] },      // the moustache
-    odysseus: { head: ['#.#.#.#', '.#####.', '...#...', '.#####.', '.#...#.', '.##.##.', '.##.##.'] },     // a plumed helmet
-    spark: { head: ['#..#..#', '.#.#.#.', '.#####.', '.#.#.#.', '.#####.', '..###..'] },                    // lightning hair
-    razor: { head: ['...#...', '..###..', '..#.#..', '..###..', '...#...'], thin: true },                    // blade-thin
+    socrates: { head: ['..###..', '.#####.', '.#.#.#.', '.#####.', '###.###', '#######', '.#####.', '..#.#..'], mouth: [4, '##...##'] }, // bald, a beard
+    nietzsche: { head: ['.#####.', '.#####.', '.#.#.#.', '.#####.', '#######', '#.#.#.#', '..###..'], mouth: [6, '..#.#..'] },      // the moustache
+    odysseus: { head: ['#.#.#.#', '.#####.', '...#...', '.#####.', '.#...#.', '.##.##.', '.##.##.'], mouth: [6, '.#...#.'] },     // a plumed helmet
+    spark: { head: ['#..#..#', '.#.#.#.', '.#####.', '.#.#.#.', '.#####.', '..###..'], mouth: [4, '.##.##.'] },                    // lightning hair
+    razor: { head: ['...#...', '..###..', '..#.#..', '..###..', '...#...'], mouth: [3, '..#.#..'], thin: true },                    // blade-thin
   };
   const HOODS = [
     ['...#...', '..###..', '.#####.', '#.....#', '#.#.#.#', '#.....#'],
@@ -34,7 +35,7 @@ page('council', (function () {
     const l = LOOKS[String(name).toLowerCase()];
     if (l) return l;
     const h = seedOf(name);
-    return { head: HOODS[h % HOODS.length], hood: true, belt: (h >> 2) % 2 === 1 };
+    return { head: HOODS[h % HOODS.length], mouth: [5, '#..#..#'], hood: true, belt: (h >> 2) % 2 === 1 };
   }
   // Standing bodies from the shoulders down, 7 wide.
   const BODY = {
@@ -46,9 +47,31 @@ page('council', (function () {
   const SMALL = { head: ['.###.', '#.#.#', '.###.'], shut: ['.###.', '#####', '.###.'], body: ['#####', '#####'] };
   const LOG = ['#########'];
   const LANTERN = ['.#.', '###', '#.#', '###'];
-  // the speaker's arm on the fire side, out and up in turn: [dx, dy] from the
-  // body's top left, for a fire to the right
-  const ARMS = [[[6, 1], [7, 1], [8, 0]], [[6, 1], [7, 0], [8, -1], [8, -2]]];
+
+  // ---- talking: the whole body ------------------------------------------------
+  // A speaker talks in phrases (a beat's pause between them): the mouth opens
+  // and shuts by syllable, the arms go from pose to pose, and it bobs up on
+  // the big ones. Each speaker keeps its own beat.
+  // Arms by shape: [dx, dy] from the shoulder, for the right arm (the left is
+  // mirrored). The shoulders: columns of the body, the arms' rows cut out.
+  const ARM = {
+    down: [[0, 0], [0, 1], [0, 2]], out: [[0, 0], [1, 0], [2, 0]], up: [[0, 0], [1, -1], [1, -2], [2, -3]],
+    wave: [[0, 0], [1, 0], [2, -1], [2, -2]], low: [[0, 0], [1, 1], [2, 2]],
+  };
+  const SHOULDERS = {
+    stand: { l: 0, r: 6, body: ['.#####.', '.#####.', '..###..', '..###..', '..###..', '..#.#..', '..#.#..'] },
+    thinStand: { l: 1, r: 5, body: ['..###..', '...#...', '...#...', '..###..', '..#.#..', '..#.#..'], down: 2 },
+    cloak: { l: 0, r: 6, body: BODY.cloak, down: 0 }, // arms come out of the cloak
+  };
+  // [left, right] for a fire on the right; mirrored for one on the left
+  const POSES = [['down', 'out'], ['out', 'out'], ['down', 'up'], ['wave', 'out'], ['up', 'up'], ['low', 'wave'], ['out', 'down'], ['low', 'low']];
+  const PHRASE = 2800, PAUSE = 500, BEAT = 380, SYLLABLE = 130;
+  function talk(t, i) {
+    const p = (t + i * 977) % PHRASE;
+    if (p >= PHRASE - PAUSE) return { open: false, pose: ['down', 'down'], bob: 0 };
+    const pose = POSES[seedOf(Math.floor((t + i * 577) / BEAT) * 31 + i) % POSES.length];
+    return { open: seedOf(Math.floor(t / SYLLABLE) * 7 + i) % 5 < 3, pose, bob: pose.includes('up') ? -1 : 0 };
+  }
 
   // Pixels of rows at (x, y), for drawing a figure with a dark outline.
   const lit = (rows, x, y, out) => rows.forEach((r, yy) => { for (let xx = 0; xx < r.length; xx++) if (r[xx] === '#') out.push([x + xx, y + yy]); });
@@ -62,17 +85,23 @@ page('council', (function () {
     const look = lookOf(m.name), s = m.state;
     const standing = s === 'writing' || s === 'tool';
     put(LOG, cx - 4, feet);
-    const head = look.head;
     if (standing) {
-      const x = cx - 3 + (side ? side * 2 : 5), ft = feet; // off the log, toward the fire or aside
-      let body = look.hood ? BODY.cloak : look.thin ? BODY.thinStand : BODY.stand;
+      const kind = look.hood ? 'cloak' : look.thin ? 'thinStand' : 'stand';
+      const tk = s === 'writing' ? talk(t, i) : null;
+      let head = look.head, body = BODY[kind];
+      if (tk && tk.open) head = head.map((r, k) => (k === look.mouth[0] ? look.mouth[1] : r));
+      const x = cx - 3 + (side ? side * 2 : 5), ft = feet + (tk ? tk.bob : 0); // off the log, toward the fire or aside
       const top = ft - body.length + 1, hy = top - head.length, px = [];
-      const toward = side || 1;
-      if (s === 'writing' && !look.thin) // the fire-side arm comes off the body to gesture
-        body = body.map((r, k) => (k >= 1 && k <= 3 ? (toward > 0 ? r.slice(0, 6) + '.' : '.' + r.slice(1)) : r));
+      if (tk) { // the arms off the body, posed
+        const sh = SHOULDERS[kind], pose = (side || 1) > 0 ? tk.pose : [tk.pose[1], tk.pose[0]];
+        body = sh.body;
+        [[sh.l, -1, pose[0]], [sh.r, 1, pose[1]]].forEach(([sx, dir, name]) => {
+          const arm = name === 'down' && sh.down !== undefined ? ARM.down.slice(0, sh.down) : ARM[name];
+          arm.forEach(([dx, dy]) => px.push([x + sx + dx * dir, top + 1 + dy]));
+        });
+      }
       lit(body, x, top, px);
       lit(head, x, hy, px);
-      if (s === 'writing') ARMS[Math.floor(t / 750 + i) % 2].forEach(([dx, dy]) => px.push([toward > 0 ? x + dx : x + 6 - dx, top + dy]));
       if (s === 'tool') lit(LANTERN, side > 0 ? x - 4 : x + 8, top + 2 + (Math.floor(t / 900 + i) % 2), px);
       px.forEach(([a, b]) => { for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) f.px(a + dx, b + dy, false); });
       px.forEach(([a, b]) => f.px(a, b));

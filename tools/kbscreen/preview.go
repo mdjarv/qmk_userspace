@@ -115,7 +115,7 @@ func (p *previewServer) page(w http.ResponseWriter, _ *http.Request) {
 <pre id=e style="color:#f77;white-space:pre-wrap"></pre></div>
 <script>setInterval(async()=>{document.getElementById('f').src='frame.png?'+Date.now();
 document.getElementById('e').textContent=await (await fetch('error')).text()},100);
-let shown='';setInterval(async()=>{const names=await (await fetch('actions')).json()||[];const key=names.join('|');if(key===shown)return;shown=key;
+let shown='';setInterval(async()=>{const names=(await (await fetch('actions')).json()||[]).sort((x,y)=>(y==='reset')-(x==='reset'));const key=names.join('|');if(key===shown)return;shown=key;
 const a=document.getElementById('a');a.replaceChildren(...names.map(n=>{const b=document.createElement('button');b.textContent=n;
 b.style.cssText='background:#222;color:#ccc;border:1px solid #444;font:13px monospace;padding:4px 8px;cursor:pointer';
 b.onclick=()=>fetch('action?name='+encodeURIComponent(n),{method:'POST'});return b}))},1000)</script>`))

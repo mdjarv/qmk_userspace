@@ -43,6 +43,13 @@ function knob(kind) {
   overrideContext = lastData ? context(lastData) : null;
 }
 
+// The preview page's reset: every page's own reset (an action named
+// '<page>: reset'), and back to the automatic page.
+action('reset', () => {
+  ACTIONS.forEach((fn, name) => { if (name.endsWith(': reset')) fn(); });
+  override = null;
+});
+
 // Shows a page as a knob press would (for actions that want to be seen).
 function showPage(name) {
   if (!has(name)) return;
