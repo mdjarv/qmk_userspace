@@ -250,6 +250,7 @@ page('council', (function () {
   action('council: ended', () => show([fake({ status: 'ended', running: false, round: 3, briefRound: 3, handedOverRound: 3 }, ['stopped'])]));
   action('council: several', () => show([fake({}, ['writing', 'thinking', 'waiting']), fake({ id: 'b' }, ['thinking']), fake({ id: 'c', status: 'ended', running: false }, ['stopped'])]));
   action('council: none', () => show([]));
+  action('council: reset', () => { fixture = null; seen.clear(); });
 
   return function council(d, t) {
     const list = order(councilsOf(d) || []);
