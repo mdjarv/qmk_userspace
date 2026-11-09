@@ -332,7 +332,7 @@ type jsWeather struct {
 }
 
 type jsKeyboard struct {
-	Layer string `json:"layer"` // base, game, lower, raise
+	Layer string `json:"layer"` // base, game, lower, raise, dungeon
 	Ctrl  bool   `json:"ctrl"`
 	Shift bool   `json:"shift"`
 	Alt   bool   `json:"alt"`
@@ -340,7 +340,7 @@ type jsKeyboard struct {
 }
 
 // The keymap's layers, in layers.h order.
-var layerNames = []string{"base", "game", "lower", "raise"}
+var layerNames = []string{"base", "game", "lower", "raise", "dungeon"}
 
 func toKeyboard(layer, mods byte) *jsKeyboard {
 	name := "layer" + strconv.Itoa(int(layer))

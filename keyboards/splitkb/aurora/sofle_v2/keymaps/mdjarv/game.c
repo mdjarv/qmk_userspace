@@ -8,13 +8,17 @@
 // and bars (game_render).
 //
 // The right OLED is drawn by the other half itself, from a small state this
-// half sends over the split link when it changes (dungeon_hud_state).
+// half sends over the split link when it changes (dungeon_hud_state). That
+// half knows the game is on from the _DUNGEON layer, which QMK's own split
+// sync carries, so a transfer that fails only delays the map, never takes
+// the game off that screen.
 #include QMK_KEYBOARD_H
 #include <string.h>
 #include "transactions.h"
 #include "game.h"
 #include "hostdata.h"
 #include "dungeon/dungeon.h"
+#include "layers.h"
 #ifdef CONVERT_TO_LIATRIS
 // The RP2040's free-running 1 MHz timer, low word (TIMERAWL, datasheet 4.6.5).
 #    define now_us() (*(volatile uint32_t *)0x40054028)
@@ -27,7 +31,7 @@
 static struct {
     uint32_t step_max, step_sum, compose_max, fail_max;
     uint16_t steps, views, loops, rpc_ok, rpc_fail;
-    uint8_t  slave_rx, slave_on;
+    uint8_t  slave_rx, slave_have;
     uint32_t sent_at;
 } diag;
 
@@ -38,7 +42,11 @@ bool game_active(void) { return active; }
 
 void game_toggle(void) {
     active = !active;
-    if (!active) return;
+    if (!active) {
+        layer_off(_DUNGEON);
+        return;
+    }
+    layer_on(_DUNGEON);
     // Whatever was held on entry would stay pressed on the computer, since
     // its release never reaches it.
     clear_keyboard();
@@ -83,57 +91,46 @@ void game_render(void) {
 
 // ------------------------------------------------------------------ right OLED
 
-// The state goes over in chunks: [0] chunk index  [1..] its bytes. Two more
-// messages: [0] HUD_ALIVE, sent when nothing changed for a while, so the
-// other half knows the game is still on; [0] HUD_OFF when it ends.
+// The state goes over in chunks: [0] chunk index  [1..] its bytes. The other
+// half answers with the chunks it holds, and missing ones are sent again.
 #define HUD_CHUNK 29
 #define HUD_CHUNKS ((DUNGEON_HUD_STATE + HUD_CHUNK - 1) / HUD_CHUNK)
-#define HUD_ALIVE 0xFE
-#define HUD_OFF 0xFF
-#define HUD_ALIVE_MS 500    // how often the game says it is still on
-#define HUD_TIMEOUT_MS 2000 // without a word this long, the other half shows its own screen again
+#define HUD_ALL ((1u << HUD_CHUNKS) - 1)
 // A failed transfer costs the split link's timeout (20 ms) of the main loop,
 // so transfers are spaced out, and more so after a failure: a link that fails
 // must not slow the keyboard down.
 #define HUD_GAP_MS 5
 #define HUD_RETRY_MS 100
 _Static_assert(HUD_CHUNK + 1 <= RPC_M2S_BUFFER_SIZE, "a chunk must fit the split RPC buffer");
-_Static_assert(HUD_CHUNKS <= 8, "pending chunks are an 8-bit mask");
+_Static_assert(HUD_CHUNKS <= 8, "chunk sets are 8-bit masks");
 
 // This half: the state, what the other half has of it, what is still to send.
 static uint8_t  hud[DUNGEON_HUD_STATE], hud_sent[DUNGEON_HUD_STATE];
 static uint8_t  hud_pending;
-static bool     hud_was_active, hud_off_pending;
-static uint32_t hud_sent_at, hud_tried_at, hud_wait;
+static bool     hud_was_active;
+static uint32_t hud_tried_at, hud_wait;
 
-// The other half: the state as received, and the frame drawn from it.
-static uint8_t  hud_rx[DUNGEON_HUD_STATE], hud_frame[DUNGEON_FRAME_SIZE];
-static bool     hud_rx_on, hud_rx_new;
-static uint32_t hud_rx_at;
-static uint8_t  hud_rx_count;
+// The other half: the state as received (and which chunks of it since the
+// game came on), and the frame drawn from it.
+static uint8_t hud_rx[DUNGEON_HUD_STATE], hud_frame[DUNGEON_FRAME_SIZE];
+static uint8_t hud_rx_have, hud_rx_count;
+static bool    hud_rx_new, hud_rx_shown;
 
 // Runs on the other half, in the split link's thread: only copies, so the
-// answer goes back quickly; the drawing happens in its OLED task. Answers with
-// [0] messages received (mod 256)  [1] whether it shows the game.
+// answer goes back quickly; the drawing happens in its OLED task. Answers
+// [0] messages received (mod 256)  [1] the chunks it holds.
 static void hud_receive(uint8_t in_len, const void *in, uint8_t out_len, void *out) {
     const uint8_t *d = in;
-    if (in_len >= 1) {
-        if (d[0] == HUD_OFF) {
-            hud_rx_on = false;
-        } else {
-            if (d[0] < HUD_CHUNKS) {
-                uint16_t off = d[0] * HUD_CHUNK;
-                memcpy(hud_rx + off, d + 1, MIN(MIN(HUD_CHUNK, DUNGEON_HUD_STATE - off), in_len - 1));
-                hud_rx_new = true;
-            }
-            hud_rx_on = true;
-            hud_rx_at = timer_read32();
-        }
+    if (in_len >= 1 && d[0] < HUD_CHUNKS) {
+        uint16_t off = d[0] * HUD_CHUNK;
+        memcpy(hud_rx + off, d + 1, MIN(MIN(HUD_CHUNK, DUNGEON_HUD_STATE - off), in_len - 1));
+        hud_rx_have |= 1u << d[0];
+        hud_rx_new = true;
     }
     hud_rx_count++;
     if (out_len >= 2) {
         ((uint8_t *)out)[0] = hud_rx_count;
-        ((uint8_t *)out)[1] = hud_rx_on;
+        ((uint8_t *)out)[1] = hud_rx_have;
     }
 }
 
@@ -142,47 +139,27 @@ void game_init(void) {
 }
 
 const uint8_t *game_hud_frame(void) {
-    if (!hud_rx_on || timer_elapsed32(hud_rx_at) >= HUD_TIMEOUT_MS) return NULL;
-    if (hud_rx_new) {
-        hud_rx_new = false;
+    if (!layer_state_is(_DUNGEON)) {
+        if (hud_rx_shown) hud_rx_have = 0; // the game ended: forget its state
+        hud_rx_shown = false;
+        return NULL;
+    }
+    if (!hud_rx_shown || hud_rx_new) {
+        hud_rx_shown = true;
+        hud_rx_new   = false;
+        // until the first state arrives this draws an empty map and pack
         dungeon_render_hud(hud_rx, hud_frame);
     }
     return hud_frame;
 }
 
-// One transfer, with the bookkeeping for the next. Returns whether it got through.
-static bool hud_send(const uint8_t *msg, uint8_t len) {
-    uint8_t  reply[2] = {0};
-    uint32_t t0       = now_us();
-    hud_tried_at      = timer_read32();
-    if (transaction_rpc_exec(USER_SYNC_DUNGEON, len, msg, sizeof(reply), reply)) {
-        hud_wait    = HUD_GAP_MS;
-        hud_sent_at = timer_read32();
-        diag.rpc_ok++;
-        diag.slave_rx = reply[0];
-        diag.slave_on = reply[1];
-        return true;
-    }
-    uint32_t us = now_us() - t0;
-    if (us > diag.fail_max) diag.fail_max = us;
-    hud_wait = HUD_RETRY_MS;
-    diag.rpc_fail++;
-    return false;
-}
-
 static void hud_task(void) {
     if (active != hud_was_active) {
-        hud_was_active  = active;
-        hud_pending     = active ? (1u << HUD_CHUNKS) - 1 : 0; // on entry the other half has nothing yet
-        hud_off_pending = !active;
-        hud_dirty       = active;
+        hud_was_active = active;
+        hud_pending    = active ? HUD_ALL : 0; // on entry the other half has nothing yet
+        hud_dirty      = active;
     }
-    if (timer_elapsed32(hud_tried_at) < hud_wait) return;
-    if (!active) {
-        static const uint8_t off[1] = {HUD_OFF};
-        if (hud_off_pending && hud_send(off, sizeof(off))) hud_off_pending = false;
-        return;
-    }
+    if (!active || timer_elapsed32(hud_tried_at) < hud_wait) return;
     if (hud_dirty) {
         hud_dirty = false;
         dungeon_hud_state(hud);
@@ -191,20 +168,28 @@ static void hud_task(void) {
             if (memcmp(hud + off, hud_sent + off, n)) hud_pending |= 1u << c;
         }
     }
-    if (!hud_pending) {
-        static const uint8_t alive[1] = {HUD_ALIVE};
-        if (timer_elapsed32(hud_sent_at) >= HUD_ALIVE_MS) hud_send(alive, sizeof(alive));
-        return;
-    }
+    if (!hud_pending) return;
     uint8_t c = 0;
     while (!(hud_pending >> c & 1)) c++;
     uint16_t off = c * HUD_CHUNK, n = MIN(HUD_CHUNK, DUNGEON_HUD_STATE - off);
-    uint8_t  msg[HUD_CHUNK + 1];
+    uint8_t  msg[HUD_CHUNK + 1], reply[2] = {0};
     msg[0] = c;
     memcpy(msg + 1, hud + off, n);
-    if (hud_send(msg, n + 1)) {
+    uint32_t t0  = now_us();
+    hud_tried_at = timer_read32();
+    if (transaction_rpc_exec(USER_SYNC_DUNGEON, n + 1, msg, sizeof(reply), reply)) {
         memcpy(hud_sent + off, hud + off, n);
         hud_pending &= ~(1u << c);
+        hud_pending |= HUD_ALL & ~reply[1]; // whatever it lost (a restart), again
+        hud_wait = HUD_GAP_MS;
+        diag.rpc_ok++;
+        diag.slave_rx   = reply[0];
+        diag.slave_have = reply[1];
+    } else {
+        uint32_t us = now_us() - t0;
+        if (us > diag.fail_max) diag.fail_max = us;
+        hud_wait = HUD_RETRY_MS;
+        diag.rpc_fail++;
     }
 }
 
@@ -217,7 +202,7 @@ static void report(void) {
     uint32_t mean = diag.steps ? diag.step_sum / diag.steps : 0;
 #define U16(v) (uint8_t)((v) > 0xFFFF ? 0xFF : (v)&0xFF), (uint8_t)((v) > 0xFFFF ? 0xFF : (v) >> 8)
     uint8_t d[19] = {U16(diag.step_max), U16(mean),      (uint8_t)MIN(diag.views, 255), U16(diag.loops), U16(diag.rpc_ok), U16(diag.rpc_fail),
-                     diag.slave_rx,      diag.slave_on, U16(diag.fail_max),             U16(diag.compose_max)};
+                     diag.slave_rx,      diag.slave_have, U16(diag.fail_max),             U16(diag.compose_max)};
 #undef U16
     host_send_report(HOST_EVENT_DUNGEON, d, sizeof(d));
     uint32_t sent_at = diag.sent_at;
