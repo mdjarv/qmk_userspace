@@ -23,10 +23,12 @@ import (
 // read-scoped token: agentique tokens add --perm read.
 
 type agentiqueClient struct {
-	base  string // https://127.0.0.1:19201
-	token string
-	http  *http.Client
-	names map[string]string // project id -> name
+	base     string // https://127.0.0.1:19201
+	token    string
+	http     *http.Client
+	names    map[string]string // project id -> name, every machine's
+	namesAt  time.Time
+	machines []string // the other machines this Agentique reaches
 }
 
 type readSession struct {
@@ -135,6 +137,10 @@ func (c *agentiqueClient) get(ctx context.Context, path string, v any) error {
 	return json.NewDecoder(resp.Body).Decode(v)
 }
 
+// agents reads the sessions of this Agentique and of every machine it
+// reaches (its read proxy, /api/read/machines/{id}/...), so agents on the
+// other machines are on the screen too. A machine that does not answer is
+// left out of this round.
 func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
 	var s struct {
 		Sessions []readSession `json:"sessions"`
@@ -142,29 +148,75 @@ func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
 	if err := c.get(ctx, "/api/read/sessions", &s); err != nil {
 		return Agents{}, err
 	}
-	for _, sess := range s.Sessions {
-		if _, ok := c.names[sess.ProjectID]; !ok {
+	all := s.Sessions
+	var m struct {
+		Machines []struct {
+			ID    string `json:"id"`
+			Self  bool   `json:"self"`
+			Reach string `json:"reach"`
+		} `json:"machines"`
+	}
+	c.machines = nil
+	if c.get(ctx, "/api/read/machines", &m) == nil {
+		for _, mc := range m.Machines {
+			if !mc.Self && mc.Reach == "ok" {
+				c.machines = append(c.machines, mc.ID)
+			}
+		}
+	}
+	results := make(chan []readSession, len(c.machines))
+	for _, id := range c.machines {
+		go func() {
+			var r struct {
+				Sessions []readSession `json:"sessions"`
+			}
+			if c.get(ctx, "/api/read/machines/"+id+"/sessions", &r) != nil {
+				r.Sessions = nil
+			}
+			results <- r.Sessions
+		}()
+	}
+	for range c.machines {
+		all = append(all, <-results...)
+	}
+	for _, sess := range all {
+		if _, ok := c.names[sess.ProjectID]; !ok && time.Since(c.namesAt) > time.Minute {
 			c.loadProjects(ctx)
 			break
 		}
 	}
-	return summarize(s.Sessions, c.names, time.Now()), nil
+	return summarize(all, c.names, time.Now()), nil
 }
 
+// loadProjects names the projects of this machine and the ones it reaches;
+// at most once a minute, so a machine that keeps failing is not asked every
+// poll.
 func (c *agentiqueClient) loadProjects(ctx context.Context) {
-	var p struct {
-		Projects []struct {
-			ID   string `json:"id"`
-			Name string `json:"name"`
-		} `json:"projects"`
+	c.namesAt = time.Now()
+	names := map[string]string{}
+	for _, path := range append([]string{"/api/read/projects"}, machinePaths(c.machines, "projects")...) {
+		var p struct {
+			Projects []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"projects"`
+		}
+		if c.get(ctx, path, &p) != nil {
+			continue
+		}
+		for _, pr := range p.Projects {
+			names[pr.ID] = pr.Name
+		}
 	}
-	if c.get(ctx, "/api/read/projects", &p) != nil {
-		return
+	c.names = names
+}
+
+func machinePaths(ids []string, route string) []string {
+	out := make([]string, len(ids))
+	for i, id := range ids {
+		out[i] = "/api/read/machines/" + id + "/" + route
 	}
-	c.names = map[string]string{}
-	for _, pr := range p.Projects {
-		c.names[pr.ID] = pr.Name
-	}
+	return out
 }
 
 const (

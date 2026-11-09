@@ -98,9 +98,20 @@ page('farm', (function () {
   const PORCH = [[10, 13], [17, 13]];
   const LANE = 12;            // a creature on the lane covers x 12..19
   const ASK = [[0, 112], [8, 112], [16, 112]]; // the mailbox stands where a fourth would
-  // Eight corners either side of the lane, staggered; the plant faces the lane.
-  const CORNERS = [];
-  for (let i = 0; i < 8; i++) CORNERS.push(i % 2 === 0 ? { x: 0, y: 24 + (i / 2) * 19, px: 9, side: 1 } : { x: 24, y: 33 + ((i - 1) / 2) * 19, px: 18, side: -1 });
+  // Eight corners scattered over the patch, at uneven heights, the plant on
+  // either side: x, y the creature's top left, px the plant's, side where the
+  // plant is. Placed so that a corner's plant and its two children (below
+  // the creature) stay clear of every other corner.
+  const CORNERS = [
+    { x: 1, y: 25, px: 10, side: 1 },
+    { x: 22, y: 30, px: 16, side: -1 },
+    { x: 6, y: 46, px: 15, side: 1 },
+    { x: 23, y: 52, px: 17, side: -1 },
+    { x: 0, y: 66, px: 9, side: 1 },
+    { x: 17, y: 71, px: 26, side: 1 },
+    { x: 10, y: 86, px: 4, side: -1 },
+    { x: 22, y: 95, px: 16, side: -1 },
+  ];
 
   // ---- drawing helpers -----------------------------------------------------------
   // Context usage is size: a pixel smaller under a third, chunky over three
@@ -361,7 +372,7 @@ page('farm', (function () {
       if (k.state === 'waiting') { c.tx = Math.min(kidAsk, 26); c.ty = 115; kidAsk += 6; }
       else if (pc && p.growing) {
         const j = at.get(k.family) || 0; at.set(k.family, j + 1);
-        c.tx = pc.side > 0 ? Math.min(j, 2) * 5 : 27 - Math.min(j, 2) * 5; c.ty = pc.y + 10 - (j > 1 ? 1 : 0);
+        c.tx = Math.min(pc.x + (j === 0 ? 0 : j === 1 ? 5 : 3), 27); c.ty = pc.y + 10 - (j > 1 ? 1 : 0);
       } else if (p) { c.tx = Math.min(Math.round(p.tx) + 9, 27); c.ty = p.ty + 3; }
       else { c.tx = DOOR[0]; c.ty = DOOR[1] + 2; }
     });
@@ -391,7 +402,7 @@ page('farm', (function () {
   const BALLOON = ['..###..', '.#####.', '#######', '##.#.##', '#######', '.#####.', '..###..', '..#.#..', '..#.#..', '..###..'];
   const SNOWMAN = ['.###.', '#.#.#', '#####', '.###.', '#####', '#####', '.###.'];
   const ROOSTER = [['.##..', '###..', '.####', '.###.', '..#..'], ['.##..', '###.#', '.####', '.###.', '..#..']];
-  const SCARECROW_AT = [0, 97], SNOWMAN_AT = [25, 24]; // the bottom left and top right gaps in the stagger
+  const SCARECROW_AT = [0, 97], SNOWMAN_AT = [0, 50]; // gaps the corners leave, beside the lane's ends and at the left
   const lerp = (a, b, k) => a + (b - a) * Math.max(0, Math.min(1, k));
   const clockMin = s => (s && s.length >= 5 ? Number(s.slice(0, 2)) * 60 + Number(s.slice(3, 5)) : -1);
   const growingPlant = () => [...mobs.values()].find(m => m.corner !== undefined && m.busy);

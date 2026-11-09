@@ -170,6 +170,13 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 			w.Write([]byte(`{"sessions":[{"projectId":"p1","state":"running"}]}`))
 		case "/api/read/projects":
 			w.Write([]byte(`{"projects":[{"id":"p1","name":"QMK Userspace"}]}`))
+		// another machine it reaches, and one it does not
+		case "/api/read/machines":
+			w.Write([]byte(`{"machines":[{"id":"m1","self":true},{"id":"m2","reach":"ok"},{"id":"m3","reach":"pending"}]}`))
+		case "/api/read/machines/m2/sessions":
+			w.Write([]byte(`{"sessions":[{"id":"w1","projectId":"p2","state":"running","parentId":"lead"}]}`))
+		case "/api/read/machines/m2/projects":
+			w.Write([]byte(`{"projects":[{"id":"p2","name":"The Pint"}]}`))
 		default:
 			http.NotFound(w, r)
 		}
@@ -182,7 +189,8 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 		t.Fatal("no client from config")
 	}
 	a, err := c.agents(context.Background())
-	if err != nil || len(a.Rows) != 1 || a.Rows[0] != (AgentRow{Name: "QMK", State: agentWorking, Context: -1}) {
+	if err != nil || len(a.Rows) != 2 || a.Rows[0].Name != "QMK" ||
+		a.Rows[1] != (AgentRow{Name: "PINT", State: agentWorking, ID: "w1", Parent: "lead", Context: -1}) {
 		t.Fatalf("agents = %+v, %v", a, err)
 	}
 	if _, err := newRemoteAgentiqueClient("host:19201", "x"); err == nil {
