@@ -536,11 +536,18 @@ page('fishing', (function () {
     }
   }
 
-  // The preview page's buttons (kbscreen :8077).
-  action('fishing: catch', () => { demo(1); showPage('fishing'); });
-  action('fishing: three catches', () => { demo(3); showPage('fishing'); });
-  action('fishing: routine', () => { routine = null; routineAt = 0; landedAt = -1e9; showPage('fishing'); });
-  EVENTS.forEach(e => action('fishing: ' + e.name, () => { forced = e; showPage('fishing'); }));
+  // The preview page's buttons (kbscreen :8077), by section.
+  action('fishing/the catch: one', () => { demo(1); showPage('fishing'); });
+  action('fishing/the catch: three at once', () => { demo(3); showPage('fishing'); });
+  action('fishing/fisherman: routine', () => { routine = null; routineAt = 0; landedAt = -1e9; showPage('fishing'); });
+  EVENTS.forEach(e => action('fishing/now and then: ' + e.name, () => { forced = e; showPage('fishing'); }));
+  // back to now: no scene or routine running, the demo fish gone, the line cast
+  action('fishing: reset', () => {
+    forced = null; cur = null; routine = null; splash = null;
+    routineAt = (lastTick || 0) + 180000 + Math.random() * 360000;
+    fish.forEach((m, id) => { if (m.demo) { if (catching === id) catching = null; fish.delete(id); } });
+    if (!catching) { landedAt = -1e9; castEnd = -1e9; }
+  });
 
   return function fishing(d, t) {
     const dt = last === null ? 50 : Math.min(200, Math.max(0, t - last)); last = t;
