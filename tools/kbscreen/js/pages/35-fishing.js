@@ -107,11 +107,20 @@ page('fishing', (function () {
   // Sky 0-9, the boat 7-19 on the surface (row 19), the water to the sand at
   // 122. Asking just under the boat, working in eight lanes, idle on the sand.
   const SURF = 19;
-  const TIP = [3, 1], HAND = [21, 12];
+  const TIP = [3, 1], HAND = [20, 10];
   const HULL = ['#....................#', '######################', '.####################.', '...################...'];
   const HULL_X = 7, HULL_Y = 16;
-  const FISHER = ['..###..', '.#####.', '#######', '.#.###.', '.#####.', '..###..', '.#####.', '######.', '.#####.'];
-  const FISHER_X = 22, FISHER_Y = 7;
+  // The fisherman, facing the line; 9 wide (a column either side for his arms).
+  const FISHER = ['...###...', '..#####..', '.#######.', '..#.###..', '..#####..', '...###...', '..#####..', '.######..', '..#####..'];
+  const CHEER = ['#..###..#', '#.#####.#', '##########'.slice(0, 9), '..#.###..', '..##.##..', '...###...', '..#####..', '..#####..', '..#####..']; // arms up, mouth open
+  const SIP = [...FISHER.slice(0, 3), '..#.##...', '.##.###..', '.##.##...', '..#####..', '..#####..', '..#####..']; // a cup to his mouth
+  const YAWN = [...FISHER.slice(0, 3), '..#####..', '..##.##..', '...#.#...', ...FISHER.slice(6)];
+  const DOZE = ['.........', '...###...', '..#####..', '.#######.', '..#####..', '..#####..', '..#####..', '.######..', '..#####..']; // head down, eye shut
+  const FISHER_X = 21, FISHER_Y = 7;
+  // The catch, in ms: the bobber held under before the strike (skipped while
+  // more are queued), the gap the fish leaves in the surface, arms up on a
+  // landing, the recast flight and the ring where the bobber lands.
+  const BITE_MS = 300, SPLASH_MS = 300, CHEER_MS = 700, CAST_MS = 500, RING_MS = 400;
   // Landed: the newest lies whole on the gunwale; the two before it show as
   // tails inside the boat, older ones are out of sight.
   const NEWEST_X = 13, TAILS = [9, 7], TAIL = ['#.#', '.#.', '.#.'];
@@ -125,7 +134,7 @@ page('fishing', (function () {
   // tick() runs whichever page shows, so fish are caught behind perf and music
   // too; the page only draws what it left.
   const fish = new Map(), lanes = new Map();
-  let lastTick = null, booted = false, catching = null;
+  let lastTick = null, booted = false, catching = null, landedAt = -1e9, castEnd = -1e9, splash = null, demos = 0;
   const SWIM = 0.004, MOVE = 0.012; // px per ms: patrolling, going somewhere
 
   function families(a) {
@@ -191,7 +200,7 @@ page('fishing', (function () {
     const mid = (p.y0 + p.y1) / 2, h = Math.max(0, mid - p.top);
     m.x = lerp(p.x0, p.x1, k); m.y = lerp(p.y0, p.y1, k) - h * 4 * k * (1 - k);
     if (p.x1 !== p.x0) m.dir = p.x1 > p.x0 ? 1 : -1;
-    if (k >= 1) { const then = p.then; m.fly = null; if (then) then(); }
+    if (k >= 1) { const then = p.then; m.fly = null; if (then) then(t); }
   }
   // Where landed fish i of n lies (its top left).
   function pileSpot(m, i, n) {
@@ -220,8 +229,9 @@ page('fishing', (function () {
     });
     // gone from the rows: archived (or parked, or quiet an hour) it swims off;
     // merged, it leaps out of the water on its way
+    fish.forEach(m => { if (m.demo && m.landed && t - m.landed > 6000) m.leaving = 'swim'; });
     fish.forEach((m, id) => {
-      if (seen.has(id) || m.leaving) return;
+      if (seen.has(id) || m.leaving || m.demo) return;
       const s = sessions.get(id);
       m.leaving = s && s.state === 'archived' && s.merged ? 'leap' : 'swim';
       m.landed = 0;
@@ -252,7 +262,7 @@ page('fishing', (function () {
     done.forEach((m, i) => { if (m.fresh) { m.landed = t + 1 + i; m.fresh = false; } });
     // the rest line up at the hook, left of the askers, next one on top
     done.filter(m => !m.landed).forEach((m, i) => { m.tx = 0; m.ty = SURF + 5 + i * 8 });
-    if (!catching) {
+    if (!catching && t >= castEnd) {
       const next = done.find(m => !m.landed);
       if (next) { catching = next.id; next.hook = { phase: 'sink', y: SURF + 1 }; }
     }
@@ -315,26 +325,44 @@ page('fishing', (function () {
     booted = true;
   });
 
-  // The catch: the hook sinks to the fish's depth while it swims to the line,
-  // it bites, it is reeled up wriggling, swung over the side into the boat.
+  // The catch: the hook sinks under the bobber while the fish swims to the
+  // line; it bites and the bobber goes under (held a moment unless more are
+  // queued); the rod dips and it is reeled up, opening a gap in the surface;
+  // it is swung into the boat, arms go up, and he recasts.
   function catchStep(m, t, dt) {
-    const h = m.hook, [w, ht] = dims(m), mouthY = Math.round(m.y + ht / 2) - 1;
+    const h = m.hook, [, ht] = dims(m), mouthY = Math.round(m.y + ht / 2) - 1;
     if (h.phase === 'sink') {
       h.y = Math.min(mouthY, h.y + dt * 0.06);
       m.tx = TIP[0]; m.ty = Math.max(m.y, SURF + 3);
       steer(m, dt, MOVE);
       m.dir = -1;
-      if (h.y >= mouthY && Math.abs(m.x - m.tx) < 0.5) { h.phase = 'reel'; m.x = TIP[0] - Math.floor(ht / 2); m.y = mouthY; }
+      if (h.y >= mouthY && Math.abs(m.x - m.tx) < 0.5) {
+        const queued = [...fish.values()].filter(o => o !== m && !o.leaving && !o.landed && o.r.state === 'done').length;
+        h.phase = 'bite'; h.t0 = t; h.hold = queued ? 0 : BITE_MS;
+      }
+    } else if (h.phase === 'bite') {
+      if (t - h.t0 >= h.hold) { h.phase = 'reel'; m.x = TIP[0] - Math.floor(ht / 2); m.y = mouthY; }
     } else if (h.phase === 'reel') {
       m.y = Math.max(TIP[1] + 2, m.y - dt * 0.035);
       h.y = m.y;
+      if (!h.breach && m.y < SURF) { h.breach = true; splash = { t0: t, x: Math.round(m.x) - 1, w: ht + 2 }; }
       if (m.y <= TIP[1] + 2) {
         h.phase = 'swing';
         const n = pile().length + 1, [px, py] = pileSpot(m, n - 1, n);
-        fly(m, t, px, py, 700, TIP[1], () => {
-          m.hook = null; catching = null; m.landed = t;
+        fly(m, t, px, py, 700, TIP[1], at => {
+          m.hook = null; catching = null; m.landed = at;
+          landedAt = at; castEnd = at + CHEER_MS + CAST_MS;
         });
       }
+    }
+  }
+
+  // Shows to set off from the preview page; they leave the save alone.
+  function demo(n) {
+    for (let i = 0; i < n; i++) {
+      const id = 'demo' + demos++, sd = seedOf(id);
+      fish.set(id, { id, sd, demo: true, dir: -1, x: W + 1 + i * 10, y: LANES[(sd + i * 3) % 8], family: id, fry: false,
+        kind: NAMES[(sd + i) % NAMES.length], r: { id, name: '', state: 'done', helpers: 0, context: -1 } });
     }
   }
 
@@ -362,10 +390,11 @@ page('fishing', (function () {
     { name: 'star', len: 1500, every: 10 * MIN, mean: 30 * MIN, when: c => c.night && c.sky === 'clear',
       draw: (c, k) => { for (let i = 0; i < 4; i++) { const kk = k - i * 0.06; if (kk > 0 && kk < 1) f.px(lerp(30, 14, kk), lerp(0, 6, kk)); } } },
   ];
-  let cur = null, nextCheck = 0;
+  let cur = null, nextCheck = 0, forced = null;
   function events(c, t) {
-    const last = store().last = store().last || {};
+    if (forced) { cur = { e: forced, at: t }; forced = null; } // from the preview: no cooldown kept
     if (!cur && t >= nextCheck) {
+      const last = store().last = store().last || {};
       nextCheck = t + 5000;
       const now = Date.now();
       const pick = EVENTS.find(e => e.when(c) && now - (last[e.name] || 0) >= e.every && Math.random() < 5000 / e.mean);
@@ -429,34 +458,64 @@ page('fishing', (function () {
     const sway = Math.round(Math.sin(t / 1500));
     for (let y = 112; y < 122; y++) f.px(30 + (y % 4 < 2 ? sway : 0), y);
   }
-  function boat(a, w, t, bob, reeling) {
-    // rod and line
-    const tip = [TIP[0], TIP[1] + (reeling ? 2 : 0) + bob];
-    line(HAND[0], HAND[1] + bob, tip[0], tip[1]);
+  // His idle routines (no data in them): one every 3 to 9 minutes while no
+  // catch is on; dozing late at night, nodding now and then.
+  const ROUTINES = [{ name: 'sip', len: 2400 }, { name: 'yawn', len: 1400 }, { name: 'check', len: 1200 }];
+  let routine = null, routineAt = 60000 + Math.random() * 180000;
+  function fisher(t, bob, hooked, clock) {
+    const h = Number(clock.slice(0, 2)), late = h >= 23 || h < 6;
+    if (t - landedAt < CHEER_MS) return { rows: CHEER, tip: 0 };
+    if (hooked || t < castEnd) { routine = null; return { rows: FISHER, tip: 0 }; }
+    if (!routine && t >= routineAt) { routine = { r: ROUTINES[Math.floor(Math.random() * ROUTINES.length)], t0: t }; routineAt = t + 180000 + Math.random() * 360000; }
+    if (routine && t - routine.t0 >= routine.r.len) routine = null;
+    if (routine) {
+      const k = (t - routine.t0) / routine.r.len;
+      if (routine.r.name === 'sip') return { rows: k > 0.15 && k < 0.85 ? SIP : FISHER, tip: 0 };
+      if (routine.r.name === 'yawn') return { rows: YAWN, tip: 0 };
+      return { rows: FISHER, tip: k < 0.5 ? -2 : 0 }; // lifts the rod to check the line
+    }
+    if (late) return { rows: (t % 5000) < 500 ? FISHER : DOZE, tip: 1 };
+    return { rows: FISHER, tip: 0 };
+  }
+  function boat(a, w, t, bob, clock) {
     const hooked = [...fish.values()].find(m => m.hook);
-    if (!hooked) { // the bobber on the surface
-      line(tip[0], tip[1], tip[0], SURF - 2);
+    const ph = hooked ? hooked.hook.phase : '', man = fisher(t, bob, hooked, clock);
+    // the rod: the tip dips a step once it bites, until the fish is in
+    const tip = [TIP[0], TIP[1] + bob + (ph === 'bite' || ph === 'reel' || ph === 'swing' ? 2 : man.tip)];
+    line(HAND[0], HAND[1] + bob, tip[0], tip[1]);
+    const bx = tip[0] - 1, by = SURF - 1; // the bobber's place
+    if (ph === 'sink') { // the bobber rides, the hook goes down under it
+      line(tip[0], tip[1], tip[0], by - 1); f.fill(bx, by, 2, 2); line(tip[0], SURF + 1, tip[0], hooked.hook.y);
+    } else if (ph === 'bite') { // pulled under
+      line(tip[0], tip[1], tip[0], hooked.hook.y); f.fill(bx, SURF + 2, 2, 2);
+    } else if (ph === 'reel') line(tip[0], tip[1], tip[0], hooked.y);
+    else if (ph === 'swing') line(tip[0], tip[1], hooked.x + 1, hooked.y);
+    else if (t < landedAt + CHEER_MS) { line(tip[0], tip[1], tip[0], tip[1] + 3); f.fill(bx, tip[1] + 4, 2, 2); } // dangling
+    else if (t < castEnd) { // the recast: out in an arc from beside him
+      const k = (t - landedAt - CHEER_MS) / CAST_MS;
+      const x = lerp(HAND[0] - 2, bx, k), y = lerp(HAND[1] - 4, by, k) - 8 * 4 * k * (1 - k);
+      line(tip[0], tip[1], x, y); f.fill(Math.round(x), Math.round(y), 2, 2);
+    } else {
       const dip = Math.floor(t / 1300) % 2; // riding the swell
-      f.fill(tip[0] - (tip[0] > 0 ? 1 : 0), SURF - 1 + dip, 2, 2);
-    } else if (hooked.hook.phase === 'sink') line(tip[0], tip[1], tip[0], hooked.hook.y);
-    else if (hooked.hook.phase === 'reel') line(tip[0], tip[1], tip[0], hooked.y);
-    else line(tip[0], tip[1], hooked.x + 1, hooked.y);
+      line(tip[0], tip[1], tip[0], by - 1 + dip); f.fill(bx, by + dip, 2, 2);
+      if (t - castEnd < RING_MS) { f.px(bx - 2, SURF - 1); f.px(bx + 3, SURF - 1); } // where it landed
+    }
     // the catch, the fisherman, the hull over them
     const p = pile();
     p.forEach((m, i) => {
       if (i === p.length - 1) knock(shape(m, Math.floor(t / 600 + m.sd) % 2), m.x, m.y + bob); // the newest still beats its tail
       else if (p.length - 2 - i < TAILS.length) f.sprite(TAIL, m.x, m.y + bob);
     });
-    f.fill(FISHER_X - 1, FISHER_Y + bob, 9, 9, false);
-    f.sprite(FISHER, FISHER_X, FISHER_Y + bob);
+    knock(man.rows, FISHER_X, FISHER_Y + bob);
     if (w.night) f.sprite(['###', '###', '.#.'], 29, 12 + bob); // the lantern on the stern
     f.fill(HULL_X, HULL_Y + bob + 1, HULL[0].length, 3, false);
     f.sprite(HULL, HULL_X, HULL_Y + bob);
     if (a && a.laterWaiting) f.sprite(BOTTLE, 28, SURF - 2 + (Math.floor(t / 1700) % 2));
   }
+  const onLine = m => m.hook && (m.hook.phase === 'reel' || m.hook.phase === 'swing');
   function drawFish(m, t) {
     const st = m.r.state, x = Math.round(m.x), y = Math.round(m.y);
-    if (m.hook && m.hook.phase !== 'sink' || (m.fly && m.y < SURF && !m.leaving && st === 'done')) { // on the line: mouth up, wriggling
+    if (onLine(m) || (m.fly && m.y < SURF && !m.leaving && st === 'done')) { // on the line: mouth up, wriggling
       const rows = hang(shape(m, 0));
       knock(Math.floor(t / 180) % 2 ? flip(rows) : rows, x, y);
       return;
@@ -477,18 +536,24 @@ page('fishing', (function () {
     }
   }
 
+  // The preview page's buttons (kbscreen :8077).
+  action('fishing: catch', () => { demo(1); showPage('fishing'); });
+  action('fishing: three catches', () => { demo(3); showPage('fishing'); });
+  action('fishing: routine', () => { routine = null; routineAt = 0; landedAt = -1e9; showPage('fishing'); });
+  EVENTS.forEach(e => action('fishing: ' + e.name, () => { forced = e; showPage('fishing'); }));
+
   return function fishing(d, t) {
     const dt = last === null ? 50 : Math.min(200, Math.max(0, t - last)); last = t;
     const a = d.agents, w = weatherOf(d);
     sky(w, t, dt);
     water(w, t);
+    if (splash && t - splash.t0 < SPLASH_MS) f.fill(splash.x, SURF, splash.w, 1, false); // the gap it left
     const bob = Math.floor(t / (w.sky === 'storm' ? 700 : 1600)) % 2;
     // the fish in the water, deepest first, then the boat and what hangs off it
-    const swimming = [...fish.values()].filter(m => !m.landed && !(m.hook && m.hook.phase !== 'sink') && !(m.fly && m.y < SURF + 2 && m.r.state === 'done'));
+    const swimming = [...fish.values()].filter(m => !m.landed && !(onLine(m)) && !(m.fly && m.y < SURF + 2 && m.r.state === 'done'));
     swimming.sort((p, q) => q.y - p.y).forEach(m => drawFish(m, t));
-    const reeling = [...fish.values()].some(m => m.hook && m.hook.phase === 'reel');
-    boat(a, w, t, bob, reeling);
-    [...fish.values()].filter(m => (m.hook && m.hook.phase !== 'sink') || (!m.landed && m.fly && m.y < SURF + 2 && m.r.state === 'done')).forEach(m => drawFish(m, t));
+    boat(a, w, t, bob, d.sys.clock);
+    [...fish.values()].filter(m => (onLine(m)) || (!m.landed && m.fly && m.y < SURF + 2 && m.r.state === 'done')).forEach(m => drawFish(m, t));
     events({ night: w.night, sky: w.sky }, t);
   };
 })());
