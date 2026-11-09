@@ -1,6 +1,7 @@
 // The left screen: a raycast view of the dungeon in line art (brick joints and
 // edges in white, fading with the torchlight), the hero's hands below it, and
-// health, depth and potions along the bottom.
+// health, depth and potions along the bottom. With the inventory open (on the
+// right screen), the item under its cursor shows large in the view.
 //
 // All maths is 16.16 fixed point: the RP2040 has no FPU. The 3D view is drawn
 // into a cache when the game changes and four times a second (the torch
@@ -483,10 +484,32 @@ static void bars(void) {
     // depth and potions
     dg_sprite(DG_STAIRS, 5, 0, DUNGEON_H - 5);
     dg_number(dg.depth, 8, DUNGEON_H - 5);
-    if (dg.potions) {
+    uint8_t potions = dg_potions();
+    if (potions) {
         dg_sprite(DG_POTION, 5, 22, DUNGEON_H - 5);
-        dg_number(dg.potions, 27, DUNGEON_H - 5);
+        dg_number(potions, 27, DUNGEON_H - 5);
     }
+}
+
+// With the inventory open, the item under its cursor shown large in the view,
+// where it can be read; the right screen's icons are tiny.
+static void inspect(void) {
+    SPR(TORCH_BIG, "..#..", ".###.", "..#..", ".###.", "..#..", "..#..", "..#..");
+    const char *const *rows = NULL;
+    uint8_t            h = 5, level = 0;
+    if (dg.cursor == SLOT_TORCH) rows = TORCH_BIG, h = 7;
+    else if (dg.cursor == SLOT_WEAPON) rows = DG_SWORD, level = dg.attack;
+    else {
+        carried_t *c = &dg.pack[dg.cursor - SLOT_PACK];
+        if (c->kind == POTION) rows = DG_POTION;
+        if (c->kind == SWORD) rows = DG_SWORD, level = c->level;
+    }
+    dg_fill(3, 8, 28, 50, false);
+    dg_rect(3, 8, 28, 50);
+    if (!rows) return; // an empty slot: an empty frame
+    uint8_t w = strlen(rows[0]);
+    dg_sprite_big(rows, h, 16 - w * 2, 14, 4);
+    if (level) dg_number(level, 14, 43);
 }
 
 static void dead(void) {
@@ -598,5 +621,6 @@ void dungeon_render(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms) {
     }
     threats();
     hands(now_ms);
+    if (dg.menu) inspect();
     bars();
 }

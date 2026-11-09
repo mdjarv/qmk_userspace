@@ -186,7 +186,8 @@ static void new_floor(uint32_t now) {
     for (uint8_t i = 0; i < nloot && dg.nitem < MAX_ITEMS; i++) {
         item_t *it = &dg.item[dg.nitem];
         if (!free_cell(d, 2, &it->x, &it->y)) break;
-        it->kind = loot[roll(dg.depth % 3 == 0 ? 4 : 2)]; // swords and hearts on every third floor
+        it->kind  = loot[roll(dg.depth % 3 == 0 ? 4 : 2)]; // swords and hearts on every third floor
+        it->level = 2 + dg.depth / 3 > 4 ? 4 : 2 + dg.depth / 3;
         dg.nitem++;
     }
     look();
@@ -203,8 +204,9 @@ void dungeon_start(uint32_t seed, uint32_t now_ms) {
     dg.rng     = seed ? seed : 1;
     dg.hp      = MAX_HP;
     dg.attack  = 1;
-    dg.potions = 1;
     dg.depth   = 1;
+    for (uint8_t k = 0; k < PACK; k++) dg.pack[k].kind = NOTHING;
+    dg.pack[0].kind = POTION;
     new_floor(now_ms);
 }
 
@@ -264,15 +266,61 @@ static void strike(monster_t *m, uint32_t now) {
     m->awake = true;
 }
 
+uint8_t dg_potions(void) {
+    uint8_t n = 0;
+    for (uint8_t k = 0; k < PACK; k++) n += dg.pack[k].kind == POTION;
+    return n;
+}
+
+// A heart heals at once; potions and swords go in the pack, if it has room.
 static void pick_up(void) {
     item_t *it = dg_item_at(dg.x, dg.y);
     if (!it) return;
-    switch (it->kind) {
-        case POTION: if (dg.potions < 9) dg.potions++; break;
-        case SWORD: if (dg.attack < 4) dg.attack++; break;
-        case HEART: dg.hp = MAX_HP; break;
+    if (it->kind == HEART) {
+        dg.hp = MAX_HP;
+    } else {
+        uint8_t k = 0;
+        while (k < PACK && dg.pack[k].kind != NOTHING) k++;
+        if (k == PACK) return; // full: it stays on the floor
+        dg.pack[k] = (carried_t){it->kind, it->level};
     }
     *it = dg.item[--dg.nitem];
+}
+
+// Where the inventory cursor goes from each slot: up, down, left, right.
+// The hands are a row of two over the pack's rows of three.
+static const uint8_t MOVE[4][SLOTS] = {
+    {SLOT_TORCH, SLOT_WEAPON, SLOT_TORCH, SLOT_WEAPON, SLOT_WEAPON, SLOT_PACK, SLOT_PACK + 1, SLOT_PACK + 2},
+    {SLOT_PACK, SLOT_PACK + 2, SLOT_PACK + 3, SLOT_PACK + 4, SLOT_PACK + 5, SLOT_PACK + 3, SLOT_PACK + 4, SLOT_PACK + 5},
+    {SLOT_TORCH, SLOT_TORCH, SLOT_PACK, SLOT_PACK, SLOT_PACK + 1, SLOT_PACK + 3, SLOT_PACK + 3, SLOT_PACK + 4},
+    {SLOT_WEAPON, SLOT_WEAPON, SLOT_PACK + 1, SLOT_PACK + 2, SLOT_PACK + 2, SLOT_PACK + 4, SLOT_PACK + 5, SLOT_PACK + 5},
+};
+
+// A key while the inventory is open. Returns whether it used a turn.
+static bool menu_press(uint8_t button) {
+    switch (button) {
+        case DUNGEON_UP: dg.cursor = MOVE[0][dg.cursor]; return false;
+        case DUNGEON_DOWN: dg.cursor = MOVE[1][dg.cursor]; return false;
+        case DUNGEON_LEFT: dg.cursor = MOVE[2][dg.cursor]; return false;
+        case DUNGEON_RIGHT: dg.cursor = MOVE[3][dg.cursor]; return false;
+        case DUNGEON_BACK:
+        case DUNGEON_MENU: dg.menu = false; return false;
+        case DUNGEON_ACT: break;
+        default: return false;
+    }
+    if (dg.cursor < SLOT_PACK) return false;
+    carried_t *c = &dg.pack[dg.cursor - SLOT_PACK];
+    if (c->kind == POTION && dg.hp < MAX_HP) { // drinking takes a turn
+        dg.hp   = dg.hp + 2 > MAX_HP ? MAX_HP : dg.hp + 2;
+        c->kind = NOTHING;
+        return true;
+    }
+    if (c->kind == SWORD) { // swords swap hands for free
+        uint8_t level = c->level;
+        c->level      = dg.attack;
+        dg.attack     = level;
+    }
+    return false;
 }
 
 // Steps one cell in absolute direction k; walking into a monster attacks it.
@@ -299,6 +347,10 @@ void dungeon_press(uint8_t button, uint32_t now_ms) {
     dg.version++;
     dg.pressed_at = now_ms;
     bool turn = false;
+    if (dg.menu) {
+        if (menu_press(button)) monsters_turn(now_ms);
+        return;
+    }
     switch (button) {
         case DUNGEON_TURN_LEFT: dg.dir = (dg.dir + 3) % 4; break;
         case DUNGEON_TURN_RIGHT: dg.dir = (dg.dir + 1) % 4; break;
@@ -326,13 +378,7 @@ void dungeon_press(uint8_t button, uint32_t now_ms) {
             }
             break;
         }
-        case DUNGEON_BACK:
-            if (dg.potions && dg.hp < MAX_HP) {
-                dg.potions--;
-                dg.hp = dg.hp + 2 > MAX_HP ? MAX_HP : dg.hp + 2;
-                turn = true;
-            }
-            break;
+        case DUNGEON_MENU: dg.menu = true; break;
         default: return;
     }
     if (turn) monsters_turn(now_ms);
@@ -355,7 +401,7 @@ void dungeon_sim_put(uint8_t f, char what) {
         if (what == mons[k] && dg.nmon < MAX_MONSTERS && !dg_monster_at(x, y))
             dg.mon[dg.nmon++] = (monster_t){.x = x, .y = y, .kind = k, .hp = KIND[k].hp, .awake = true};
     for (uint8_t k = 0; items[k]; k++)
-        if (what == items[k] && dg.nitem < MAX_ITEMS && !dg_item_at(x, y)) dg.item[dg.nitem++] = (item_t){.x = x, .y = y, .kind = k};
+        if (what == items[k] && dg.nitem < MAX_ITEMS && !dg_item_at(x, y)) dg.item[dg.nitem++] = (item_t){.x = x, .y = y, .kind = k, .level = 2};
     if (what == '>') dg.map[y][x] = STAIRS;
     look();
     dg.version++;

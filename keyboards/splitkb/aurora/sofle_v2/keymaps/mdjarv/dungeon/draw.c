@@ -41,6 +41,12 @@ void dg_sprite(const char *const *rows, uint8_t h, int16_t x, int16_t y) {
             if (rows[j][i] == '#') dg_px(x + i, y + j, true);
 }
 
+void dg_sprite_big(const char *const *rows, uint8_t h, int16_t x, int16_t y, uint8_t scale) {
+    for (uint8_t j = 0; j < h; j++)
+        for (uint8_t i = 0; rows[j][i]; i++)
+            if (rows[j][i] == '#') dg_fill(x + i * scale, y + j * scale, x + i * scale + scale - 1, y + j * scale + scale - 1, true);
+}
+
 void dg_sprite_ring(const char *const *rows, uint8_t h, int16_t x, int16_t y) {
     for (uint8_t j = 0; j < h; j++)
         for (uint8_t i = 0; rows[j][i]; i++)

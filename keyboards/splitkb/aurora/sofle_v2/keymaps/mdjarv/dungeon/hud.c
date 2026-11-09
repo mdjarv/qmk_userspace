@@ -38,41 +38,62 @@ static void automap(void) {
                 dg_fill(ax + 1, ay + 1, ax + 2, ay + 2, false);
             }
         }
-    // the player: a black arrowhead cut into a white square, which reads in
-    // a corridor and in the middle of a filled room alike
-    static const char *const ARROW[4][6] = {
-        {"######", "##..##", "#....#", "#.##.#", "######", "######"},
-        {"######", "#..###", "##...#", "##...#", "#..###", "######"},
-        {"######", "######", "#.##.#", "#....#", "##..##", "######"},
-        {"######", "###..#", "#...##", "#...##", "###..#", "######"},
+    // the player: a black arrow with a white outline, which reads on a dark
+    // corridor (the outline) and in a filled room (the arrow)
+    static const char *const ARROW[4][4] = {
+        {".##.", ".##.", "####", "#..#"},
+        {"##..", ".###", ".###", "##.."},
+        {"#..#", "####", ".##.", ".##."},
+        {"..##", "###.", "###.", "..##"},
     };
-    int16_t ax = (dg.x - x0) * 4 - 1, ay = (dg.y - y0) * 4 - 1;
-    dg_fill(ax - 1, ay - 1, ax + 6, ay + 6, false); // a dark rim, so the square stands out of a room
-    dg_sprite(ARROW[dg.dir], 6, ax, ay);
+    int16_t ax = (dg.x - x0) * 4, ay = (dg.y - y0) * 4;
+    for (int8_t j = 0; j < 4; j++)
+        for (int8_t i = 0; i < 4; i++)
+            if (ARROW[dg.dir][j][i] == '#')
+                for (int8_t b = -1; b <= 1; b++)
+                    for (int8_t a2 = -1; a2 <= 1; a2++) dg_px(ax + i + a2, ay + j + b, true);
+    for (int8_t j = 0; j < 4; j++)
+        for (int8_t i = 0; i < 4; i++)
+            if (ARROW[dg.dir][j][i] == '#') dg_px(ax + i, ay + j, false);
 }
 
-// What the hero carries: the sword (with its level) and the torch in hand,
-// potions in the pack.
+SPR(TORCH_ICON, "..#..", ".###.", "..#..", ".###.", "..#..", "..#..", "..#..");
+SPR(SWORD_BIG, "......#", ".....#.", "....#..", "#..#...", ".##....", ".##....", "#..#...");
+
+// The slots' boxes: the hands (two, wide) over the pack (two rows of three).
+static void slot_box(uint8_t slot, int16_t *x0, int16_t *y0, int16_t *x1, int16_t *y1) {
+    if (slot < SLOT_PACK) {
+        *x0 = slot * 17, *x1 = *x0 + 14, *y0 = 84, *y1 = 98;
+    } else {
+        uint8_t k = slot - SLOT_PACK;
+        *x0 = (k % 3) * 11, *x1 = *x0 + 9, *y0 = 103 + (k / 3) * 13, *y1 = *y0 + 11;
+    }
+}
+
+// What the hero carries. With the inventory open, the slot under the cursor
+// has a second frame inside its own.
 static void kit(void) {
-    SPR(TORCH_ICON, "..#..", ".###.", "..#..", ".###.", "..#..", "..#..", "..#..");
-    SPR(SWORD_BIG, "......#", ".....#.", "....#..", "#..#...", ".##....", ".##....", "#..#...");
-    int16_t y = 86;
-    dg_rect(0, y, 14, y + 14);
-    dg_sprite(TORCH_ICON, 7, 5, y + 4);
-    dg_rect(17, y, 31, y + 14);
-    dg_sprite(SWORD_BIG, 7, 21, y + 4);
-    if (dg.attack > 1) dg_number(dg.attack, 27, y + 9);
-    y = 106;
-    for (uint8_t k = 0; k < 3; k++) {
-        int16_t x = k * 11;
-        dg_rect(x, y, x + 9, y + 10);
-    }
-    if (dg.potions) {
-        dg_sprite(DG_POTION, 5, 3, y + 3);
-        if (dg.potions > 1) dg_number(dg.potions, 13, y + 3);
+    for (uint8_t slot = 0; slot < SLOTS; slot++) {
+        int16_t x0, y0, x1, y1;
+        slot_box(slot, &x0, &y0, &x1, &y1);
+        dg_rect(x0, y0, x1, y1);
+        if (dg.menu && slot == dg.cursor) dg_rect(x0 + 1, y0 + 1, x1 - 1, y1 - 1);
+        int16_t cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        if (slot == SLOT_TORCH) {
+            dg_sprite(TORCH_ICON, 7, cx - 2, cy - 3);
+        } else if (slot == SLOT_WEAPON) {
+            dg_sprite(SWORD_BIG, 7, cx - 4, cy - 3);
+            if (dg.attack > 1) dg_number(dg.attack, x1 - 4, y1 - 6);
+        } else {
+            carried_t *c = &dg.pack[slot - SLOT_PACK];
+            if (c->kind == POTION) dg_sprite(DG_POTION, 5, cx - 1, cy - 2);
+            if (c->kind == SWORD) {
+                dg_sprite(DG_SWORD, 5, x0 + 2, cy - 2);
+                dg_number(c->level, x0 + 6, y1 - 6);
+            }
+        }
     }
 }
-
 void dungeon_render_hud(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms) {
     (void)now_ms;
     dg_fb = frame;

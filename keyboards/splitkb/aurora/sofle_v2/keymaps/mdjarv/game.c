@@ -35,14 +35,15 @@ void game_toggle(void) {
 static int8_t button(uint16_t keycode) {
     if (IS_QK_MOD_TAP(keycode)) keycode = QK_MOD_TAP_GET_TAP_KEYCODE(keycode);
     switch (keycode) {
-        case KC_W: case KC_K: case KC_UP: return DUNGEON_UP;
-        case KC_S: case KC_J: case KC_DOWN: return DUNGEON_DOWN;
-        case KC_A: case KC_H: case KC_LEFT: return DUNGEON_LEFT;
-        case KC_D: case KC_L: case KC_RIGHT: return DUNGEON_RIGHT;
+        case KC_W: case KC_UP: return DUNGEON_UP;
+        case KC_S: case KC_DOWN: return DUNGEON_DOWN;
+        case KC_A: case KC_LEFT: return DUNGEON_LEFT;
+        case KC_D: case KC_RIGHT: return DUNGEON_RIGHT;
         case KC_Q: return DUNGEON_TURN_LEFT;
         case KC_E: return DUNGEON_TURN_RIGHT;
         case KC_SPC: case KC_ENT: case KC_F: return DUNGEON_ACT;
-        case KC_ESC: case KC_BSPC: case KC_TAB: return DUNGEON_BACK;
+        case KC_ESC: case KC_BSPC: return DUNGEON_BACK;
+        case KC_TAB: return DUNGEON_MENU;
     }
     return -1;
 }

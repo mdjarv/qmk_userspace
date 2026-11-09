@@ -81,3 +81,22 @@ func TestATurnGlidesFromThePress(t *testing.T) {
 		t.Fatal("the view 80 ms after a turn is not between the old and new view")
 	}
 }
+
+// Tab opens the inventory; Space on the starting potion (the first pack slot,
+// below the torch) drinks it, which shows in the health bar and potion count.
+func TestDrinkingFromTheInventory(t *testing.T) {
+	bars := func(f []byte) []byte { return f[448:] } // rows 112-127
+	play := func(keys ...string) []byte {
+		start(7, 0)
+		setHP(2)
+		now := uint32(0)
+		for _, k := range keys {
+			now += 100
+			press(buttons[k], now)
+		}
+		return bars(render(now + 1000))
+	}
+	if bytes.Equal(play("tab", "s", "space", "tab"), play("tab", "s", "tab")) {
+		t.Fatal("drinking the potion changed neither health nor the potion count")
+	}
+}

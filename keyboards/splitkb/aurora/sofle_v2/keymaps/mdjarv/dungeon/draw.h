@@ -18,6 +18,8 @@ void    dg_fill(int16_t x0, int16_t y0, int16_t x1, int16_t y1, bool on);
 // the rings of things that touch first, then their pixels.
 void    dg_sprite(const char *const *rows, uint8_t h, int16_t x, int16_t y);
 void    dg_sprite_ring(const char *const *rows, uint8_t h, int16_t x, int16_t y);
+// The same, each pixel drawn as a scale x scale block.
+void    dg_sprite_big(const char *const *rows, uint8_t h, int16_t x, int16_t y, uint8_t scale);
 // Draws n in 3x5 digits; returns the x after it.
 int16_t dg_number(uint8_t n, int16_t x, int16_t y);
 

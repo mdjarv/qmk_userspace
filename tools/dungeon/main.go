@@ -124,7 +124,7 @@ func (m model) View() tea.View {
 		b.WriteString("\n")
 	}
 	fmt.Fprintf(&b, "└%s┘   └%s┘\n", line, line)
-	fmt.Fprintf(&b, "seed %d  ctrl+r new  ctrl+c quit", m.seed)
+	fmt.Fprintf(&b, "wasd move  qe turn  space act  tab pack  esc back\nseed %d  ctrl+r new  ctrl+c quit", m.seed)
 	return tea.NewView(b.String())
 }
 

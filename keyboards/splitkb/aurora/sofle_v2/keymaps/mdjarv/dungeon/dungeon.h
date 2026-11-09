@@ -23,6 +23,7 @@ enum dungeon_button {
     DUNGEON_TURN_RIGHT,
     DUNGEON_ACT,
     DUNGEON_BACK,
+    DUNGEON_MENU, // the inventory on the right screen, and back
     DUNGEON_BUTTONS,
 };
 
