@@ -31,3 +31,8 @@ void dungeon_start(uint32_t seed, uint32_t now_ms);
 void dungeon_press(uint8_t button, uint32_t now_ms);
 // Draws the whole frame. Cheap enough to call 20 times a second.
 void dungeon_render(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms);
+
+#ifdef DUNGEON_SIM
+void dungeon_sim_put(uint8_t f, char what);
+void dungeon_sim_hp(uint8_t hp);
+#endif

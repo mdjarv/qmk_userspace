@@ -27,14 +27,14 @@ func TestSameSeedAndKeysDrawTheSameFrame(t *testing.T) {
 	}
 }
 
-func TestMovingChangesTheFrame(t *testing.T) {
+func TestAKeyChangesTheFrame(t *testing.T) {
 	before := play(7, nil)
-	for _, k := range []string{"w", "a", "s", "d"} {
+	for _, k := range []string{"w", "a", "s", "d", "q", "e"} {
 		if !bytes.Equal(play(7, []int{buttons[k]}), before) {
 			return
 		}
 	}
-	t.Fatal("no direction changed the frame")
+	t.Fatal("no key changed the frame")
 }
 
 func TestSurvivesRandomPlay(t *testing.T) {
@@ -49,5 +49,19 @@ func TestSurvivesRandomPlay(t *testing.T) {
 				render(now)
 			}
 		}
+	}
+}
+
+func TestSpaceStartsAgainAfterDying(t *testing.T) {
+	start(7, 0)
+	setHP(0)
+	dead := render(100)
+	press(buttons["w"], 200)
+	if !bytes.Equal(render(100), dead) {
+		t.Fatal("a key other than Space left the death screen")
+	}
+	press(buttons["space"], 300)
+	if bytes.Equal(render(100), dead) {
+		t.Fatal("Space did not start a new game")
 	}
 }

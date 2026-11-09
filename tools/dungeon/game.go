@@ -1,6 +1,7 @@
 package main
 
 /*
+#cgo CFLAGS: -DDUNGEON_SIM
 #include "dungeon.h"
 */
 import "C"
@@ -33,3 +34,8 @@ func render(now uint32) []byte {
 }
 
 func lit(f []byte, x, y int) bool { return f[x+(y/8)*width]>>(y%8)&1 == 1 }
+
+// put places something f cells ahead (see dungeon_sim_put): r b k m, p s h, >.
+func put(f int, what byte) { C.dungeon_sim_put(C.uint8_t(f), C.char(what)) }
+
+func setHP(hp int) { C.dungeon_sim_hp(C.uint8_t(hp)) }

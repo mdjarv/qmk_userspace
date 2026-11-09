@@ -1,6 +1,7 @@
 // Command dungeon plays the keyboard's dungeon game on the PC, from the same C
 // core the firmware runs (keymaps/mdjarv/dungeon). Interactive in the
-// terminal by default; with -png it plays -keys and writes the last frame.
+// terminal by default; with -png it plays -keys and writes the last frame,
+// with -scenes it draws set pieces for design rounds.
 package main
 
 import (
@@ -22,7 +23,15 @@ func main() {
 	out := flag.String("png", "", "write the frame after -keys to this PNG and exit")
 	scale := flag.Int("scale", 4, "PNG pixel size")
 	at := flag.Uint("at", 0, "ms after the last key the -png frame is drawn at")
+	sceneDir := flag.String("scenes", "", "write the design-round scenes (scenes.go) as PNGs into this directory and exit")
 	flag.Parse()
+
+	if *sceneDir != "" {
+		if err := writeScenes(*sceneDir, uint32(max(*seed, 1)), *scale); err != nil {
+			fail("%v", err)
+		}
+		return
+	}
 
 	if *seed == 0 {
 		*seed = uint(time.Now().UnixNano())
