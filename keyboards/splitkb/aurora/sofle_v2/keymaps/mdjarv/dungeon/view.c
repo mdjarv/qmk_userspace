@@ -228,10 +228,28 @@ SPR(CHEVRON_D, "#######", ".#####.", "..###..", "...#...");
 static uint16_t surf[VIEW_H][DUNGEON_W]; // what each pixel shows, for the edges
 static fx       zbuf[DUNGEON_W];         // distance to the wall in each column
 static uint32_t mask[VIEW_H];            // a sprite's pixels, one bit per column
-enum { SURF_CEILING, SURF_FLOOR, SURF_STAIRS, SURF_WALL };
+// Floor cells near enough to show their joints get their own ids, from here.
+enum { SURF_CEILING, SURF_FLOOR, SURF_STAIRS, SURF_WALL, SURF_NEAR_FLOOR = 0x300 };
 
-static fx camx, camy;          // the eye
-static int8_t dirx, diry, rgtx, rgty;
+static fx     camx, camy;         // the eye
+static fx     cdx, cdy, crx, cry; // where it looks, and its right, as vectors
+static int8_t dirx, diry, rgtx, rgty; // the same in whole cells, for the rules
+
+// A pebble or two on some floor cells, so one stretch of corridor is not
+// the same as the next.
+static bool pebble(int8_t mx, int8_t my, fx u, fx v) {
+    uint8_t h = (uint8_t)(mx * 37 + my * 11 + dg.depth * 5) % 9;
+    if (h > 2) return false;
+    fx pu = Q(0.2) + (fx)((h * 23 + mx) % 7) * Q(0.09), pv = Q(0.25) + (fx)((h * 13 + my) % 5) * Q(0.12);
+    fx du = u - pu, dv = v - pv;
+    return mulq(du, du) + mulq(dv, dv) < Q(0.0035);
+}
+
+static bool edge(uint16_t a, uint16_t b) {
+    if (a == b) return false;
+    bool wa = a >= SURF_STAIRS && a < SURF_NEAR_FLOOR, wb = b >= SURF_STAIRS && b < SURF_NEAR_FLOOR;
+    return wa || wb || (a >= SURF_NEAR_FLOOR && b >= SURF_NEAR_FLOOR);
+}
 
 // Where the front monster was drawn, for the hit effects.
 static int16_t front_x = -1, front_y;
@@ -273,7 +291,7 @@ static void cast(fx detail_shift) {
     for (int16_t y = HORIZON; y < VIEW_H; y++) floor_d[y] = divq(mulq(EYE, FOCAL), y * ONE + ONE / 2 - HORIZON * ONE);
     for (int16_t i = 0; i < DUNGEON_W; i++) {
         fx p  = mulq(PLANE, ((2 * i + 1) * ONE) / DUNGEON_W - ONE);
-        fx rx = dirx * ONE + rgtx * p, ry = diry * ONE + rgty * p;
+        fx rx = cdx + mulq(crx, p), ry = cdy + mulq(cry, p);
         // walk the grid (DDA) to the first wall or door
         int8_t mx = camx >> 16, my = camy >> 16, sx, sy, side = 0;
         fx     ddx = rx ? divq(ONE, rx < 0 ? -rx : rx) : (1 << 30);
@@ -308,11 +326,15 @@ static void cast(fx detail_shift) {
                 surf[y][i] = SURF_CEILING;
                 lit        = y < HORIZON && beam[y];
             } else if (yc > bot) {
-                // the floor is dark; the stairs down show their steps
-                fx df      = floor_d[y];
-                fx wx      = camx + mulq(df, rx), wy = camy + mulq(df, ry);
-                surf[y][i] = SURF_FLOOR;
-                if (dg_at(wx >> 16, wy >> 16) == STAIRS) {
+                // the floor is dark, with its joints and pebbles near the
+                // torch; the stairs down show their steps
+                fx     df = floor_d[y];
+                fx     wx = camx + mulq(df, rx), wy = camy + mulq(df, ry);
+                int8_t fx_ = wx >> 16, fy_ = wy >> 16;
+                bool   close = df < DETAIL + detail_shift;
+                surf[y][i]   = close ? SURF_NEAR_FLOOR + (fy_ & 15) * MAP + (fx_ & 15) : SURF_FLOOR;
+                lit          = close && pebble(fx_, fy_, wx & 0xFFFF, wy & 0xFFFF);
+                if (dg_at(fx_, fy_) == STAIRS) {
                     surf[y][i]   = SURF_STAIRS;
                     int32_t step = (df * 4) >> 16;
                     lit          = last_step >= 0 && step != last_step;
@@ -331,7 +353,7 @@ static void cast(fx detail_shift) {
         for (int16_t x = 0; x < DUNGEON_W; x++) {
             uint16_t s = surf[y][x];
             uint16_t r = x + 1 < DUNGEON_W ? surf[y][x + 1] : s, b = y + 1 < VIEW_H ? surf[y + 1][x] : s;
-            if ((r != s && (r >= SURF_STAIRS || s >= SURF_STAIRS)) || (b != s && (b >= SURF_STAIRS || s >= SURF_STAIRS))) dg_px(x, y, true);
+            if (edge(s, r) || edge(s, b)) dg_px(x, y, true);
         }
 }
 
@@ -340,7 +362,7 @@ static void cast(fx detail_shift) {
 // it is out of sight.
 static bool billboard(const char *const *rows, uint8_t h, uint8_t cx, uint8_t cy, fx height, fx lift, int16_t *sx_out, int16_t *top_out) {
     fx dx = cx * ONE + ONE / 2 - camx, dy = cy * ONE + ONE / 2 - camy;
-    fx ty = dirx * dx + diry * dy, tx = rgtx * dx + rgty * dy;
+    fx ty = mulq(cdx, dx) + mulq(cdy, dy), tx = mulq(crx, dx) + mulq(cry, dy);
     if (ty < Q(0.35) || ty > FAR) return false;
     fx      sx = 16 * ONE + divq(mulq(tx, FOCAL), ty);
     fx      hp = divq(mulq(height, FOCAL), ty);
@@ -386,11 +408,11 @@ static void things(uint32_t now) {
     uint8_t n = 0;
     for (uint8_t k = 0; k < dg.nmon; k++) {
         fx dx = dg.mon[k].x * ONE - (camx - ONE / 2), dy = dg.mon[k].y * ONE - (camy - ONE / 2);
-        order[n++] = (struct drawable){dirx * dx + diry * dy, (int8_t)k, -1};
+        order[n++] = (struct drawable){mulq(cdx, dx) + mulq(cdy, dy), (int8_t)k, -1};
     }
     for (uint8_t k = 0; k < dg.nitem; k++) {
         fx dx = dg.item[k].x * ONE - (camx - ONE / 2), dy = dg.item[k].y * ONE - (camy - ONE / 2);
-        order[n++] = (struct drawable){dirx * dx + diry * dy + 1, -1, (int8_t)k}; // behind a monster on the same cell
+        order[n++] = (struct drawable){mulq(cdx, dx) + mulq(cdy, dy) + 1, -1, (int8_t)k}; // behind a monster on the same cell
     }
     for (uint8_t a = 1; a < n; a++)
         for (uint8_t b = a; b > 0 && order[b].ty > order[b - 1].ty; b--) {
@@ -477,6 +499,65 @@ static void dead(void) {
     }
 }
 
+// ------------------------------------------------------------------ the eye
+
+// Steps and turns glide over GLIDE_MS instead of jumping, so a step down a
+// corridor (where every cell looks alike) shows as movement.
+#define GLIDE_MS 160
+// sin of 0..90 degrees in 32 steps; an angle is 0..127 (N, E, S, W at 0, 32, 64, 96)
+static const fx SIN[33] = {0,     3216,  6424,  9616,  12785, 15924, 19024, 22078, 25080, 28020, 30893,
+                           33692, 36410, 39040, 41576, 44011, 46341, 48559, 50660, 52639, 54491, 56212,
+                           57798, 59244, 60547, 61705, 62714, 63572, 64277, 64827, 65220, 65457, 65536};
+typedef struct {
+    fx      x, y;
+    int16_t angle;
+} pose_t;
+
+static pose_t   pose_from, pose_to, eye;
+static uint32_t glide_at, pose_floor = UINT32_MAX;
+
+static void look_along(int16_t angle) {
+    angle &= 127;
+    uint8_t q = angle / 32, r = angle % 32;
+    fx      x = SIN[r], y = -SIN[32 - r]; // a quarter turn clockwise from north
+    for (uint8_t k = 0; k < q; k++) {
+        fx t = x;
+        x    = -y;
+        y    = t;
+    }
+    cdx = x, cdy = y, crx = -y, cry = x;
+}
+
+// Sets the eye for this moment; returns whether it is still gliding.
+static bool place_eye(uint32_t now) {
+    pose_t to = {dg.x * ONE + ONE / 2 - DX[dg.dir] * BACK, dg.y * ONE + ONE / 2 - DY[dg.dir] * BACK, (int16_t)(dg.dir * 32)};
+    if (to.x != pose_to.x || to.y != pose_to.y || to.angle != pose_to.angle || dg.floor_at != pose_floor) {
+        fx   far  = (to.x > eye.x ? to.x - eye.x : eye.x - to.x) + (to.y > eye.y ? to.y - eye.y : eye.y - to.y);
+        bool jump = dg.floor_at != pose_floor || far > Q(1.5); // a new floor or game: no glide
+        pose_from  = jump ? to : eye; // from wherever the eye is now, mid-glide or not
+        pose_to    = to;
+        pose_floor = dg.floor_at;
+        glide_at   = now - dg.pressed_at < GLIDE_MS ? dg.pressed_at : now; // from the key press, not from when this got drawn
+    }
+    dirx = DX[dg.dir], diry = DY[dg.dir];
+    rgtx = DX[(dg.dir + 1) % 4], rgty = DY[(dg.dir + 1) % 4];
+    uint32_t t = now - glide_at;
+    bool     gliding = t < GLIDE_MS && (pose_from.x != pose_to.x || pose_from.y != pose_to.y || pose_from.angle != pose_to.angle);
+    if (!gliding) {
+        eye = pose_to;
+    } else {
+        fx k = (fx)(t * ONE / GLIDE_MS);
+        k    = mulq(k, 2 * ONE - k); // eases out
+        int16_t da = (pose_to.angle - pose_from.angle) & 127;
+        if (da > 64) da -= 128; // the short way round
+        eye = (pose_t){pose_from.x + mulq(pose_to.x - pose_from.x, k), pose_from.y + mulq(pose_to.y - pose_from.y, k),
+                       (int16_t)((pose_from.angle + ((da * k) >> 16)) & 127)};
+    }
+    camx = eye.x, camy = eye.y;
+    look_along(eye.angle);
+    return gliding;
+}
+
 // Moves the view one pixel sideways (a blow taken).
 static void shake(int8_t by) {
     for (uint8_t page = 0; page < (VIEW_H + 7) / 8; page++) {
@@ -497,15 +578,12 @@ void dungeon_render(uint8_t frame[DUNGEON_FRAME_SIZE], uint32_t now_ms) {
         bars();
         return;
     }
-    if (dg.version != cached_version || tick != cached_tick) {
-        cached_version = dg.version;
+    bool gliding = place_eye(now_ms);
+    if (gliding || dg.version != cached_version || tick != cached_tick) {
+        cached_version = gliding ? UINT32_MAX : dg.version;
         cached_tick    = tick;
         dg_fb          = view;
         memset(view, 0, sizeof(view));
-        dirx = DX[dg.dir], diry = DY[dg.dir];
-        rgtx = DX[(dg.dir + 1) % 4], rgty = DY[(dg.dir + 1) % 4];
-        camx = dg.x * ONE + ONE / 2 - dirx * BACK;
-        camy = dg.y * ONE + ONE / 2 - diry * BACK;
         // the torchlight breathes: how far the joints show moves a little
         fx flicker = (fx)((tick * 2654435761u) >> 30) * Q(0.12);
         cast(flicker);

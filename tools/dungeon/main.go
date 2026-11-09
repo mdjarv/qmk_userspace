@@ -45,6 +45,7 @@ func main() {
 			fail("unknown key %q", k)
 		}
 		now += 200
+		render(now) // as the keyboard does every frame, so steps glide from where they were
 		press(b, now)
 	}
 

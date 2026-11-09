@@ -297,6 +297,7 @@ void dungeon_press(uint8_t button, uint32_t now_ms) {
     }
     dg.swung = dg.hit = dg.hurt = false;
     dg.version++;
+    dg.pressed_at = now_ms;
     bool turn = false;
     switch (button) {
         case DUNGEON_TURN_LEFT: dg.dir = (dg.dir + 3) % 4; break;
@@ -306,6 +307,10 @@ void dungeon_press(uint8_t button, uint32_t now_ms) {
         case DUNGEON_LEFT: turn = step((dg.dir + 3) % 4, now_ms); break;
         case DUNGEON_RIGHT: turn = step((dg.dir + 1) % 4, now_ms); break;
         case DUNGEON_ACT: {
+            // the sword swings whatever is there, so a press always shows;
+            // it lands only on a monster in the next cell
+            dg.swing_at = now_ms;
+            dg.swung    = true;
             int8_t      fx = dg.x + DX[dg.dir], fy = dg.y + DY[dg.dir];
             monster_t *m  = dg_monster_at(fx, fy);
             if (m) {

@@ -38,16 +38,17 @@ static void automap(void) {
                 dg_fill(ax + 1, ay + 1, ax + 2, ay + 2, false);
             }
         }
-    // the player: a solid arrow the way it faces, drawn over the corridor
-    static const char *const ARROW[4][4] = {
-        {".##.", "####", "####", "#..#"},
-        {"##..", "####", "####", "##.."},
-        {"#..#", "####", "####", ".##."},
-        {"..##", "####", "####", "..##"},
+    // the player: a black arrowhead cut into a white square, which reads in
+    // a corridor and in the middle of a filled room alike
+    static const char *const ARROW[4][6] = {
+        {"######", "##..##", "#....#", "#.##.#", "######", "######"},
+        {"######", "#..###", "##...#", "##...#", "#..###", "######"},
+        {"######", "######", "#.##.#", "#....#", "##..##", "######"},
+        {"######", "###..#", "#...##", "#...##", "###..#", "######"},
     };
-    int16_t ax = (dg.x - x0) * 4, ay = (dg.y - y0) * 4;
-    dg_fill(ax, ay, ax + 3, ay + 3, false);
-    dg_sprite(ARROW[dg.dir], 4, ax, ay);
+    int16_t ax = (dg.x - x0) * 4 - 1, ay = (dg.y - y0) * 4 - 1;
+    dg_fill(ax - 1, ay - 1, ax + 6, ay + 6, false); // a dark rim, so the square stands out of a room
+    dg_sprite(ARROW[dg.dir], 6, ax, ay);
 }
 
 // What the hero carries: the sword (with its level) and the torch in hand,

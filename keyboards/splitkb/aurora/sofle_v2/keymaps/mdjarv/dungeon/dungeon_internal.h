@@ -39,7 +39,7 @@ typedef struct {
     item_t    item[MAX_ITEMS];
     uint8_t   nitem;
     // what just happened, for the screens to show for a moment
-    uint32_t swing_at, hit_at, hurt_at, floor_at;
+    uint32_t pressed_at, swing_at, hit_at, hurt_at, floor_at;
     bool     swung, hit, hurt;
 } dungeon_game_t;
 
