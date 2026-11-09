@@ -399,7 +399,11 @@ const EVENTS = [
   },
   { // every 500 turns Agentique has run: a balloon goes up
     name: 'balloon', len: 20000, every: 0,
-    when: c => { const n = Math.floor(c.a.totals.turns / 500); if (c.g.turnMark == null) c.g.turnMark = n; // count from the first sight, not from history return n > c.g.turnMark; },
+    when: c => {
+      const n = Math.floor(c.a.totals.turns / 500);
+      if (c.g.turnMark == null) c.g.turnMark = n; // count from the first sight, not from history
+      return n > c.g.turnMark;
+    },
     start: c => { c.g.turnMark = Math.floor(c.a.totals.turns / 500); },
     draw: (c, k, t) => f.sprite(BALLOON, Math.round(lerp(4, 16, k) + Math.sin(t / 900) * 2), Math.round(lerp(110, -12, k))),
   },
