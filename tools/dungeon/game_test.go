@@ -66,3 +66,15 @@ func TestSpaceStartsAgainAfterDying(t *testing.T) {
 		t.Fatal("Space did not start a new game")
 	}
 }
+
+// A turn glides from the key press: a frame shortly after it is between the
+// old view and the new one (all within one torch-flicker period, 250 ms).
+func TestATurnGlidesFromThePress(t *testing.T) {
+	start(7, 0)
+	before := render(1000)
+	press(buttons["q"], 1000)
+	mid, end := render(1080), render(1240)
+	if bytes.Equal(mid, before) || bytes.Equal(mid, end) {
+		t.Fatal("the frame 80 ms after a turn is not between the old and new view")
+	}
+}
