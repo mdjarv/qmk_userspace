@@ -26,15 +26,18 @@ function onTrial(d) {
   TRIAL.forEach(([from, name]) => { if (d.sys.date >= from) page = name; });
   return page;
 }
-// A live council debating, writing its brief, with an answer not yet handed
-// over, or moved in the last five minutes (just started, or between rounds);
-// not one idle since its answer was handed over.
-const COUNCIL_FRESH_S = 300;
+// A live council debating or writing its brief; one whose answer has waited
+// less than an hour; or one that moved in the last five minutes and has a
+// round not yet handed over (just started, or between rounds). Agentique
+// keeps councils "live" for weeks with an answer nobody took, so waiting alone
+// is not enough, and it reports briefRound 0, so rounds are judged by round.
+const COUNCIL_FRESH_S = 300, COUNCIL_WAIT_S = 3600;
 const councilBusy = d => (d.councils || []).some(c => {
   if (c.status === 'ended') return false;
-  if (c.running || c.scribing || c.waiting) return true;
-  const handed = c.briefRound > 0 && c.handedOverRound >= c.briefRound;
-  return !handed && c.updatedAgo >= 0 && c.updatedAgo < COUNCIL_FRESH_S;
+  if (c.running || c.scribing) return true;
+  const fresh = s => c.updatedAgo >= 0 && c.updatedAgo < s;
+  if (c.waiting) return fresh(COUNCIL_WAIT_S);
+  return c.handedOverRound < c.round && fresh(COUNCIL_FRESH_S);
 });
 function context(d) {
   if (councilBusy(d) && has('council')) return 'council';

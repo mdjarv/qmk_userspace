@@ -148,6 +148,7 @@ func TestSpectrumPutsToneInItsBand(t *testing.T) {
 // and the token goes in the Authorization header. Councils come from every
 // machine, newest first; a 404 (an Agentique without them) is none.
 func TestRemoteAgentiqueClient(t *testing.T) {
+	m2Down := false
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Header.Get("Authorization") != "Bearer aqt_test" {
 			http.Error(w, "no", http.StatusUnauthorized)
@@ -162,6 +163,10 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 		case "/api/read/machines":
 			w.Write([]byte(`{"machines":[{"id":"m1","self":true},{"id":"m2","reach":"ok"},{"id":"m3","reach":"pending"}]}`))
 		case "/api/read/machines/m2/sessions":
+			if m2Down {
+				http.Error(w, "timeout", http.StatusGatewayTimeout)
+				return
+			}
 			w.Write([]byte(`{"sessions":[{"id":"w1","projectId":"p2","state":"running","parentId":"lead"}]}`))
 		case "/api/read/machines/m2/councils":
 			w.Write([]byte(`{"councils":[{"id":"old","status":"ended","updatedAt":"2026-11-09T08:00:00Z"},
@@ -189,6 +194,16 @@ func TestRemoteAgentiqueClient(t *testing.T) {
 	if len(d.Councils) != 2 || d.Councils[0].ID != "new" || d.Councils[0].Title != "Karnfragan" || d.Councils[0].Round != 2 || d.Councils[0].UpdatedAgo != 59 ||
 		d.Councils[0].Cast[0] != (jsCouncilMember{Name: "Sokrates", Role: "questioner", State: "tool", Turn: 2, Tool: "WebSearch"}) {
 		t.Fatalf("councils = %+v", d.Councils)
+	}
+	// a machine that fails to answer keeps its sessions for a while, then not
+	m2Down = true
+	if a, err := c.agents(context.Background()); err != nil || len(a.Rows) != 2 {
+		t.Fatalf("one failed read emptied the machine: %+v, %v", a.Rows, err)
+	}
+	defer func(h time.Duration) { holdFor = h }(holdFor)
+	holdFor = 0
+	if a, err := c.agents(context.Background()); err != nil || len(a.Rows) != 1 {
+		t.Fatalf("a machine down for good stays on screen: %+v, %v", a.Rows, err)
 	}
 	if _, err := newRemoteAgentiqueClient("host:19201", "x"); err == nil {
 		t.Fatal("a URL without a scheme must be refused")

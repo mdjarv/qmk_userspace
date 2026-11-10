@@ -64,6 +64,8 @@ func TestBuiltInScreensRender(t *testing.T) {
 	}
 	agents := &Agents{Rows: []AgentRow{{Name: "QMK", State: agentWorking, ID: "a"}, {Name: "SEISI", State: agentWaiting, ID: "b"}}, Running: 1, Waiting: 2,
 		LaterWaiting: 1, OldestWait: 72 * time.Hour, NewQuestion: true}
+	stale := *agents // a council left waiting weeks ago
+	stale.Councils = []Council{{ID: "c0", Status: "live", Waiting: true, Round: 2, UpdatedAt: "2026-10-12T09:35:32Z"}}
 	council := *agents
 	council.Councils = []Council{{ID: "c1", Status: "live", Running: true, Round: 2, AutoRounds: 3,
 		Cast: []CouncilMember{{Name: "Socrates", State: "writing"}, {Name: "Wren", State: "thinking"}}}}
@@ -78,6 +80,7 @@ func TestBuiltInScreensRender(t *testing.T) {
 		{"perf", testData(false, agents), 3},     // farm -> fishing -> council -> perf, round the end
 		{"music", testData(true, agents), 4},     // -> music
 		{"council", testData(true, &council), 0}, // a council at work comes up by itself
+		{"farm", testData(false, &stale), 0},     // one whose answer waited since October does not
 		{"no agentique", testData(false, nil), 0},
 	} {
 		r.pressKnob(eventKnobLong) // back to the automatic page
@@ -90,6 +93,13 @@ func TestBuiltInScreensRender(t *testing.T) {
 		f, err := r.frame(c.d, 1000)
 		if err != nil {
 			t.Fatalf("%s: %v", c.name, err)
+		}
+		want := c.name
+		if want == "no agentique" {
+			want = "farm"
+		}
+		if shown := r.vm.Get("shown").String(); shown != want {
+			t.Fatalf("%s: showed %s", c.name, shown)
 		}
 		if bytes.Count(f, []byte{0}) == frameSize {
 			t.Fatalf("%s: blank frame", c.name)

@@ -28,7 +28,8 @@ type agentiqueClient struct {
 	http     *http.Client
 	names    map[string]string // project id -> name, every machine's
 	namesAt  time.Time
-	machines []string // the other machines this Agentique reaches
+	machines []string          // the other machines this Agentique reaches
+	held     map[string]source // each machine's last good answer ("" is this one)
 }
 
 type readSession struct {
@@ -123,6 +124,8 @@ func tomlString(cfg []byte, key string) string {
 	return ""
 }
 
+var errNotFound = errors.New("not found")
+
 func (c *agentiqueClient) get(ctx context.Context, path string, v any) error {
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, c.base+path, nil)
 	req.Header.Set("Authorization", "Bearer "+c.token)
@@ -131,6 +134,9 @@ func (c *agentiqueClient) get(ctx context.Context, path string, v any) error {
 		return err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("agentique: GET %s: %w", path, errNotFound)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("agentique: GET %s: %s", path, resp.Status)
 	}
@@ -143,14 +149,14 @@ func (c *agentiqueClient) get(ctx context.Context, path string, v any) error {
 // is left out of this round; councils that cannot be read (a 404 from an
 // Agentique without them) are none.
 func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
-	var s struct {
-		Sessions []readSession `json:"sessions"`
+	if c.held == nil {
+		c.held = map[string]source{}
 	}
-	if err := c.get(ctx, "/api/read/sessions", &s); err != nil {
+	src, err := c.fetchSource(ctx, "/api/read")
+	self, err := c.hold("", src, err)
+	if err != nil {
 		return Agents{}, err
 	}
-	all := s.Sessions
-	councils := c.councils(ctx, "/api/read/councils")
 	var m struct {
 		Machines []struct {
 			ID    string `json:"id"`
@@ -158,35 +164,33 @@ func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
 			Reach string `json:"reach"`
 		} `json:"machines"`
 	}
-	c.machines = nil
-	if c.get(ctx, "/api/read/machines", &m) == nil {
+	if c.get(ctx, "/api/read/machines", &m) == nil { // otherwise the machines from before
+		c.machines = nil
 		for _, mc := range m.Machines {
 			if !mc.Self && mc.Reach == "ok" {
 				c.machines = append(c.machines, mc.ID)
 			}
 		}
 	}
-	type machine struct {
-		sessions []readSession
-		councils []Council
+	type answer struct {
+		id  string
+		src source
+		err error
 	}
-	results := make(chan machine, len(c.machines))
+	answers := make(chan answer, len(c.machines))
 	for _, id := range c.machines {
 		go func() {
-			var r struct {
-				Sessions []readSession `json:"sessions"`
-			}
-			if c.get(ctx, "/api/read/machines/"+id+"/sessions", &r) != nil {
-				results <- machine{}
-				return
-			}
-			results <- machine{r.Sessions, c.councils(ctx, "/api/read/machines/"+id+"/councils")}
+			src, err := c.fetchSource(ctx, "/api/read/machines/"+id)
+			answers <- answer{id, src, err}
 		}()
 	}
+	all, councils := self.sessions, self.councils
 	for range c.machines {
-		m := <-results
-		all = append(all, m.sessions...)
-		councils = append(councils, m.councils...)
+		a := <-answers
+		if src, err := c.hold(a.id, a.src, a.err); err == nil {
+			all = append(all, src.sessions...)
+			councils = append(councils, src.councils...)
+		}
 	}
 	updated := func(c Council) time.Time { t, _ := time.Parse(time.RFC3339Nano, c.UpdatedAt); return t }
 	sort.SliceStable(councils, func(i, j int) bool { return updated(councils[i]).After(updated(councils[j])) })
@@ -201,16 +205,50 @@ func (c *agentiqueClient) agents(ctx context.Context) (Agents, error) {
 	return a, nil
 }
 
-// councils reads one Agentique's councils; none when it cannot (an Agentique
-// from before councils answers 404).
-func (c *agentiqueClient) councils(ctx context.Context, path string) []Council {
+// A machine's sessions and councils as last read. One slow or failed read
+// does not empty the screen: the last good answer stands for holdFor, so
+// creatures do not go home and come back, nor councils come and go, with
+// every timeout.
+type source struct {
+	sessions       []readSession
+	councils       []Council
+	councilsFailed bool
+	at             time.Time
+}
+
+var holdFor = time.Minute
+
+// fetchSource reads one machine (prefix /api/read, or its proxy path). No
+// councils route (an older Agentique) is no councils, not a failure.
+func (c *agentiqueClient) fetchSource(ctx context.Context, prefix string) (source, error) {
+	var s struct {
+		Sessions []readSession `json:"sessions"`
+	}
+	if err := c.get(ctx, prefix+"/sessions", &s); err != nil {
+		return source{}, err
+	}
 	var r struct {
 		Councils []Council `json:"councils"`
 	}
-	if c.get(ctx, path, &r) != nil {
-		return nil
+	err := c.get(ctx, prefix+"/councils", &r)
+	return source{sessions: s.Sessions, councils: r.Councils, councilsFailed: err != nil && !errors.Is(err, errNotFound), at: time.Now()}, nil
+}
+
+// hold keeps a good answer for key and stands in the last one for a failed
+// read while it is fresh.
+func (c *agentiqueClient) hold(key string, src source, err error) (source, error) {
+	h, had := c.held[key]
+	if err != nil {
+		if had && time.Since(h.at) < holdFor {
+			return h, nil
+		}
+		return source{}, err
 	}
-	return r.Councils
+	if src.councilsFailed && had {
+		src.councils = h.councils
+	}
+	c.held[key] = src
+	return src, nil
 }
 
 // loadProjects names the projects of this machine and the ones it reaches;
