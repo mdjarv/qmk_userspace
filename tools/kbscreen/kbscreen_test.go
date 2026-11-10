@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"image"
-	"image/color"
 	"math"
 	"net/http"
 	"net/http/httptest"
@@ -100,20 +98,6 @@ func TestAgentsNowAndLater(t *testing.T) {
 	}
 }
 
-// The art goes straight into the OLED buffer: byte x + page*32, bit 0 on top.
-func TestDitherArtOLEDLayout(t *testing.T) {
-	img := image.NewGray(image.Rect(0, 0, 64, 64))
-	for y := range 32 { // top half white
-		for x := range 64 {
-			img.SetGray(x, y, color.Gray{255})
-		}
-	}
-	art := ditherArt(img)
-	if art[0] != 0xFF || art[31+32] != 0xFF || art[64] != 0 || art[127] != 0 {
-		t.Fatalf("art pages: %x %x %x %x", art[0], art[63], art[64], art[127])
-	}
-}
-
 func TestCPULoadFromStatDeltas(t *testing.T) {
 	root := t.TempDir()
 	write(t, root+"/proc/stat", []byte("cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 100 0 0 0 0 0 0 0 0 0\nintr 1\n"))
@@ -132,8 +116,8 @@ func TestParsers(t *testing.T) {
 	if v, m, ok := parseVolume("Volume: 0.40 [MUTED]\n"); !ok || v != 40 || !m {
 		t.Fatalf("parseVolume = %d %v %v", v, m, ok)
 	}
-	tr := parseTrack("Playing\t238000000\tNeon Harbor\tThe Lowlights\tfile:///tmp/a.png")
-	if !tr.playing || tr.length != 238 || tr.title != "Neon Harbor" || tr.artURL != "file:///tmp/a.png" {
+	tr := parseTrack("Playing\t238000000\tNeon Harbor\tThe Lowlights")
+	if !tr.playing || tr.length != 238 || tr.title != "Neon Harbor" || tr.artist != "The Lowlights" {
 		t.Fatalf("parseTrack = %+v", tr)
 	}
 	if tr := parseTrack(""); tr.playing || tr.title != "" {

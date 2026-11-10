@@ -31,7 +31,6 @@ type state struct {
 	media            Media
 	agents           Agents
 	hasAgents        bool
-	artURL           string // the track whose art media.Art is, or is waiting for
 	keyboard         *jsKeyboard
 	weather          *Weather // nil until the first answer, or without a place
 }
@@ -343,30 +342,11 @@ func watchMedia(ctx context.Context, st *state, spectrum chan<- [bandCount]uint8
 			}
 			return
 		case t := <-tracks:
-			artChanged := t.artURL != cur.artURL
 			cur = t
 			st.update(func(st *state) {
 				st.media.Playing, st.media.Length = t.playing, t.length
 				st.media.Title, st.media.Artist = t.title, t.artist
-				if artChanged {
-					st.media.Art, st.artURL = [artSize]byte{}, t.artURL
-				}
 			})
-			if artChanged && t.artURL != "" {
-				go func(url string) {
-					img, err := loadArt(ctx, url)
-					if err != nil {
-						log.Printf("media: %v", err)
-						return
-					}
-					art := ditherArt(img)
-					st.update(func(st *state) {
-						if st.artURL == url { // still the same track
-							st.media.Art = art
-						}
-					})
-				}(t.artURL)
-			}
 			if t.playing && stopSpectrum == nil {
 				var sctx context.Context
 				sctx, stopSpectrum = context.WithCancel(ctx)

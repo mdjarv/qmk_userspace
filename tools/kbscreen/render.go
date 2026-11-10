@@ -376,7 +376,6 @@ type jsMedia struct {
 	Volume           int    `json:"volume"` // percent, -1 unknown
 	Muted            bool   `json:"muted"`
 	VolumeChangedAgo int    `json:"volumeChangedAgo"` // ms, -1 never
-	Art              []int  `json:"art"`              // 128 bytes, 32x32 in OLED layout
 	Bands            []int  `json:"bands"`            // 10 spectrum bands 0..255, zero when silent
 }
 
@@ -458,7 +457,7 @@ func toJS(sys Sys, cpuHist, gpuHist []uint8, m Media, a *Agents, now time.Time) 
 		Media: jsMedia{
 			Playing: m.Playing, Title: asciiOnly(m.Title), Artist: asciiOnly(m.Artist),
 			Position: int(m.Position), Length: int(m.Length), Volume: -1, Muted: m.Muted, VolumeChangedAgo: -1,
-			Art: ints(m.Art[:]), Bands: make([]int, bandCount),
+			Bands: make([]int, bandCount),
 		},
 	}
 	if m.Volume != 255 {

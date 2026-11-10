@@ -12,18 +12,17 @@ import (
 
 // Media state comes from playerctl (MPRIS) and wpctl/pactl (volume).
 
-const playerFormat = "{{status}}\t{{mpris:length}}\t{{xesam:title}}\t{{xesam:artist}}\t{{mpris:artUrl}}"
+const playerFormat = "{{status}}\t{{mpris:length}}\t{{xesam:title}}\t{{xesam:artist}}"
 
 type trackInfo struct {
 	playing       bool
 	length        uint16
 	title, artist string
-	artURL        string
 }
 
 func parseTrack(line string) trackInfo {
 	f := strings.Split(line, "\t")
-	if len(f) < 5 || f[0] == "" {
+	if len(f) < 4 || f[0] == "" {
 		return trackInfo{}
 	}
 	us, _ := strconv.ParseUint(f[1], 10, 64)
@@ -32,7 +31,6 @@ func parseTrack(line string) trackInfo {
 		length:  uint16(min(us/1_000_000, 65535)),
 		title:   f[2],
 		artist:  f[3],
-		artURL:  f[4],
 	}
 }
 

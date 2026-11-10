@@ -23,7 +23,8 @@ Each came from a round of mockups or from using it on the keyboard (2026-11-06).
 - **Graphs are lines, no fill pattern under them.** Levels (RAM, VRAM) are solid tanks, not cells or dithering. 32 per-thread bars were too busy.
 - **Pair what belongs together**: CPU load beside its RAM tank, GPU load beside its VRAM tank, with clear separation (a gap and a dotted line) between the pairs.
 - **Show only what matters now.** The battery appears only while charging or discharging; temperature and power were dropped as not needed; VRAM stays because local LLMs make it matter.
-- **A notification replaces something rather than adding**: the asking robot takes the battery percent's place on perf and the album art's corner on music.
+- **A notification replaces something rather than adding**: the asking robot takes the battery percent's place on perf and the corner by the tonearm's pivot on music.
+- **Music is a turntable** (2026-11-10): the record spins while it plays and stops on pause, and the tonearm is the track position. No album art: at 32x32 and dithered it showed nothing.
 - **Charging is a plug, not a lightning bolt** (the bolt looked odd at this size).
 - **Recent first, old things fold away.** Sessions quiet for an hour leave the farm; questions left for days become the mailbox, idle ones a Z from the farmhouse, instead of pinning the screen.
 - **The screen never switches itself to demand attention.** The farm and the fishing page take turns; a council at work comes up (context, not an alert). Music does not: switching to it whenever a track started was annoying, so it is a knob press away (2026-11-09).

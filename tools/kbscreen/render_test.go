@@ -46,7 +46,6 @@ func testData(playing bool, agents *Agents) jsData {
 	now := time.Date(2026, 11, 6, 14, 53, 0, 0, time.Local)
 	m := Media{Playing: playing, Title: "Björk – Jóga", Artist: "Björk", Position: 102, Length: 238, Volume: 40,
 		VolumeChanged: now.Add(-time.Second), BandsAt: now}
-	m.Art[0] = 0xFF
 	m.Bands[2] = 200
 	s := Sys{CPU: 47, GPU: 12, RAMUsed: 18.4, RAMTotal: 31, VRAMUsed: 22.6, VRAMTotal: 32, Battery: 76, BatteryState: batteryCharging}
 	return toJS(s, []uint8{10, 50, 90}, []uint8{5, 5, 80}, m, agents, now)

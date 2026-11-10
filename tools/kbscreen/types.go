@@ -10,7 +10,6 @@ import (
 // JavaScript screens.
 
 const (
-	artSize   = 128 // 32x32 album art in OLED layout
 	bandCount = 10
 	historyN  = 32 // load samples kept, one a second
 )
@@ -45,7 +44,6 @@ type Media struct {
 	Volume           uint8  // percent, 255 unknown
 	VolumeChanged    time.Time
 	Title, Artist    string
-	Art              [artSize]byte
 	Bands            [bandCount]uint8
 	BandsAt          time.Time
 }
